@@ -1,0 +1,921 @@
+{
+  "openapi" : "3.1.0",
+  "info" : {
+    "title" : "Ledger API",
+    "description" : "Contrato REST comum às fases v1, v2 e v3. Valores em unidades menores da moeda.",
+    "version" : "1"
+  },
+  "tags" : [ {
+    "name" : "Consultas",
+    "description" : "Q1–Q4 (docs/SCOPE.md). Datas em ISO-8601 UTC; valores em centavos"
+  }, {
+    "name" : "Comandos",
+    "description" : "Todo comando exige Idempotency-Key; o reenvio devolve o resultado original"
+  } ],
+  "paths" : {
+    "/transfers" : {
+      "post" : {
+        "tags" : [ "Comandos" ],
+        "summary" : "Transfere entre contas da mesma moeda (partida dobrada)",
+        "operationId" : "transfer",
+        "parameters" : [ {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Chave única por pedido. Reenvio com a mesma chave e o mesmo corpo devolve a resposta original (inclusive recusas) com o header Idempotent-Replayed: true",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/TransferRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Aceito; com Idempotent-Replayed: true quando é reenvio",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TransactionPosted"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Entrada malformada ou sem Idempotency-Key",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "ACCOUNT_NOT_FOUND",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422" : {
+            "description" : "INSUFFICIENT_FUNDS, SAME_ACCOUNT, CURRENCY_MISMATCH ou Idempotency-Key reutilizada",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts" : {
+      "post" : {
+        "tags" : [ "Comandos" ],
+        "summary" : "Abre uma conta (uma por titular e moeda)",
+        "operationId" : "open",
+        "parameters" : [ {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Chave única por pedido. Reenvio com a mesma chave e o mesmo corpo devolve a resposta original (inclusive recusas) com o header Idempotent-Replayed: true",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/OpenAccountRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Aceito; com Idempotent-Replayed: true quando é reenvio",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AccountOpened"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Entrada malformada ou sem Idempotency-Key",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "409" : {
+            "description" : "ACCOUNT_ALREADY_EXISTS",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422" : {
+            "description" : "Idempotency-Key reutilizada com outro corpo",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{accountId}/withdrawals" : {
+      "post" : {
+        "tags" : [ "Comandos" ],
+        "summary" : "Saca da conta, até saldo + limite",
+        "operationId" : "withdraw",
+        "parameters" : [ {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Chave única por pedido. Reenvio com a mesma chave e o mesmo corpo devolve a resposta original (inclusive recusas) com o header Idempotent-Replayed: true",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "accountId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/MovementRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Aceito; com Idempotent-Replayed: true quando é reenvio",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TransactionPosted"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Entrada malformada ou sem Idempotency-Key",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "ACCOUNT_NOT_FOUND",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422" : {
+            "description" : "INSUFFICIENT_FUNDS, UNKNOWN_CATEGORY, CURRENCY_MISMATCH ou Idempotency-Key reutilizada",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{accountId}/deposits" : {
+      "post" : {
+        "tags" : [ "Comandos" ],
+        "summary" : "Deposita na conta",
+        "operationId" : "deposit",
+        "parameters" : [ {
+          "name" : "Idempotency-Key",
+          "in" : "header",
+          "description" : "Chave única por pedido. Reenvio com a mesma chave e o mesmo corpo devolve a resposta original (inclusive recusas) com o header Idempotent-Replayed: true",
+          "required" : true,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "accountId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "requestBody" : {
+          "content" : {
+            "application/json" : {
+              "schema" : {
+                "$ref" : "#/components/schemas/MovementRequest"
+              }
+            }
+          },
+          "required" : true
+        },
+        "responses" : {
+          "201" : {
+            "description" : "Aceito; com Idempotent-Replayed: true quando é reenvio",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/TransactionPosted"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Entrada malformada ou sem Idempotency-Key",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "ACCOUNT_NOT_FOUND",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "422" : {
+            "description" : "UNKNOWN_CATEGORY, CURRENCY_MISMATCH ou Idempotency-Key reutilizada",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{accountId}" : {
+      "get" : {
+        "tags" : [ "Consultas" ],
+        "summary" : "Q1 — saldo atual da conta",
+        "operationId" : "account",
+        "parameters" : [ {
+          "name" : "accountId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/AccountView"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Parâmetro inválido",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "ACCOUNT_NOT_FOUND",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{accountId}/statement" : {
+      "get" : {
+        "tags" : [ "Consultas" ],
+        "summary" : "Q2 — extrato do período [from, to), mais recentes primeiro, paginado por cursor",
+        "operationId" : "statement",
+        "parameters" : [ {
+          "name" : "accountId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "from",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }, {
+          "name" : "to",
+          "in" : "query",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 50
+          }
+        }, {
+          "name" : "cursor",
+          "in" : "query",
+          "description" : "nextCursor da página anterior",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/StatementPage"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Parâmetro inválido",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "ACCOUNT_NOT_FOUND",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{accountId}/monthly-summary" : {
+      "get" : {
+        "tags" : [ "Consultas" ],
+        "summary" : "Q3 — créditos e débitos por mês e categoria nos 12 meses que terminam em until",
+        "operationId" : "monthlySummary",
+        "parameters" : [ {
+          "name" : "accountId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "until",
+          "in" : "query",
+          "description" : "Último mês (yyyy-MM); padrão: mês corrente em UTC",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          },
+          "example" : "2026-09"
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/MonthlySummary"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Parâmetro inválido",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "ACCOUNT_NOT_FOUND",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/accounts/{accountId}/entries/search" : {
+      "get" : {
+        "tags" : [ "Consultas" ],
+        "summary" : "Q4 — busca livre com filtros combinados (E), mais recentes primeiro",
+        "operationId" : "search",
+        "parameters" : [ {
+          "name" : "accountId",
+          "in" : "path",
+          "required" : true,
+          "schema" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }, {
+          "name" : "q",
+          "in" : "query",
+          "description" : "Palavras que devem aparecer todas na descrição ou na contraparte",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "counterparty",
+          "in" : "query",
+          "description" : "Trecho do nome da contraparte",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          }
+        }, {
+          "name" : "category",
+          "in" : "query",
+          "description" : "Código da categoria",
+          "required" : false,
+          "schema" : {
+            "type" : "string"
+          },
+          "example" : "GROCERIES"
+        }, {
+          "name" : "from",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }, {
+          "name" : "to",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "string",
+            "format" : "date-time"
+          }
+        }, {
+          "name" : "minAmount",
+          "in" : "query",
+          "description" : "Valor mínimo, em módulo",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }, {
+          "name" : "maxAmount",
+          "in" : "query",
+          "description" : "Valor máximo, em módulo",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }, {
+          "name" : "limit",
+          "in" : "query",
+          "required" : false,
+          "schema" : {
+            "type" : "integer",
+            "format" : "int32",
+            "default" : 50
+          }
+        } ],
+        "responses" : {
+          "200" : {
+            "description" : "OK",
+            "content" : {
+              "application/json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/SearchResult"
+                }
+              }
+            }
+          },
+          "400" : {
+            "description" : "Parâmetro inválido",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          },
+          "404" : {
+            "description" : "ACCOUNT_NOT_FOUND",
+            "content" : {
+              "application/problem+json" : {
+                "schema" : {
+                  "$ref" : "#/components/schemas/ProblemDetail"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components" : {
+    "schemas" : {
+      "TransferRequest" : {
+        "type" : "object",
+        "properties" : {
+          "sourceAccountId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "targetAccountId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "amount" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "currency" : {
+            "type" : "string",
+            "example" : "BRL",
+            "minLength" : 1
+          },
+          "description" : {
+            "type" : "string",
+            "minLength" : 1
+          }
+        },
+        "required" : [ "amount", "currency", "description", "sourceAccountId", "targetAccountId" ]
+      },
+      "ProblemDetail" : {
+        "type" : "object",
+        "properties" : {
+          "type" : {
+            "type" : "string",
+            "format" : "uri"
+          },
+          "title" : {
+            "type" : "string"
+          },
+          "status" : {
+            "type" : "integer",
+            "format" : "int32"
+          },
+          "detail" : {
+            "type" : "string"
+          },
+          "instance" : {
+            "type" : "string",
+            "format" : "uri"
+          },
+          "properties" : {
+            "type" : "object",
+            "additionalProperties" : { }
+          }
+        }
+      },
+      "Posting" : {
+        "type" : "object",
+        "properties" : {
+          "accountId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "amount" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "balanceAfter" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "TransactionPosted" : {
+        "type" : "object",
+        "properties" : {
+          "transactionId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "postings" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/Posting"
+            }
+          }
+        }
+      },
+      "OpenAccountRequest" : {
+        "type" : "object",
+        "properties" : {
+          "holderId" : {
+            "type" : "string",
+            "minLength" : 1
+          },
+          "holderName" : {
+            "type" : "string",
+            "minLength" : 1
+          },
+          "currency" : {
+            "type" : "string",
+            "example" : "BRL",
+            "minLength" : 1
+          },
+          "overdraftLimit" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        },
+        "required" : [ "currency", "holderId", "holderName" ]
+      },
+      "AccountOpened" : {
+        "type" : "object",
+        "properties" : {
+          "accountId" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }
+      },
+      "MovementRequest" : {
+        "type" : "object",
+        "properties" : {
+          "amount" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "currency" : {
+            "type" : "string",
+            "example" : "BRL",
+            "minLength" : 1
+          },
+          "category" : {
+            "type" : "string",
+            "example" : "GROCERIES",
+            "minLength" : 1
+          },
+          "description" : {
+            "type" : "string",
+            "minLength" : 1
+          },
+          "counterparty" : {
+            "type" : "string",
+            "minLength" : 1
+          }
+        },
+        "required" : [ "amount", "category", "counterparty", "currency", "description" ]
+      },
+      "AccountView" : {
+        "type" : "object",
+        "properties" : {
+          "accountId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "holderId" : {
+            "type" : "string"
+          },
+          "holderName" : {
+            "type" : "string"
+          },
+          "currency" : {
+            "type" : "string"
+          },
+          "balance" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "overdraftLimit" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "CategoryView" : {
+        "type" : "object",
+        "properties" : {
+          "code" : {
+            "type" : "string"
+          },
+          "name" : {
+            "type" : "string"
+          }
+        }
+      },
+      "CounterpartyView" : {
+        "type" : "object",
+        "properties" : {
+          "name" : {
+            "type" : "string"
+          },
+          "accountId" : {
+            "type" : "string",
+            "format" : "uuid"
+          }
+        }
+      },
+      "EntryView" : {
+        "type" : "object",
+        "properties" : {
+          "entryId" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "transactionId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "occurredAt" : {
+            "type" : "string",
+            "format" : "date-time"
+          },
+          "kind" : {
+            "type" : "string",
+            "enum" : [ "DEPOSIT", "WITHDRAWAL", "TRANSFER_IN", "TRANSFER_OUT" ]
+          },
+          "amount" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "balanceAfter" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "category" : {
+            "$ref" : "#/components/schemas/CategoryView"
+          },
+          "description" : {
+            "type" : "string"
+          },
+          "counterparty" : {
+            "$ref" : "#/components/schemas/CounterpartyView"
+          }
+        }
+      },
+      "StatementPage" : {
+        "type" : "object",
+        "properties" : {
+          "accountId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/EntryView"
+            }
+          },
+          "nextCursor" : {
+            "type" : "string"
+          }
+        }
+      },
+      "MonthlyCategoryTotal" : {
+        "type" : "object",
+        "properties" : {
+          "month" : {
+            "type" : "string"
+          },
+          "category" : {
+            "$ref" : "#/components/schemas/CategoryView"
+          },
+          "credits" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "debits" : {
+            "type" : "integer",
+            "format" : "int64"
+          },
+          "entries" : {
+            "type" : "integer",
+            "format" : "int64"
+          }
+        }
+      },
+      "MonthlySummary" : {
+        "type" : "object",
+        "properties" : {
+          "accountId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "from" : {
+            "type" : "string"
+          },
+          "until" : {
+            "type" : "string"
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/MonthlyCategoryTotal"
+            }
+          }
+        }
+      },
+      "SearchResult" : {
+        "type" : "object",
+        "properties" : {
+          "accountId" : {
+            "type" : "string",
+            "format" : "uuid"
+          },
+          "items" : {
+            "type" : "array",
+            "items" : {
+              "$ref" : "#/components/schemas/EntryView"
+            }
+          }
+        }
+      }
+    }
+  }
+}
