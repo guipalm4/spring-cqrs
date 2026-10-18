@@ -6,6 +6,8 @@ medindo cada fase. O valor do projeto está na comparação honesta, não em "CQ
 ## Fontes de verdade (ler antes de decidir algo)
 
 - `docs/SCOPE.md` — fases, domínio, consultas Q1–Q4, hipóteses H1–H7, marcos M0–M7.
+- `docs/api/openapi.json` — contrato REST congelado; `ApiContractTests` compara com `/v3/api-docs`.
+  Mudança intencional: `./mvnw verify -Dcontract.update=true` e revisar o diff.
 - `docs/adr/` — decisões fechadas. **Não reabrir uma decisão sem escrever um ADR novo** que a substitua.
 - Issue do marco no GitHub (`gh issue view <n>`) — critérios de pronto. Marcos M0–M7 = issues #1–#8.
 
@@ -22,6 +24,7 @@ medindo cada fase. O valor do projeto está na comparação honesta, não em "CQ
 make verify          # build + testes (Testcontainers; precisa de Docker)
 make up PHASE=v1     # sobe a fase e espera ficar saudável (v1 | v2)
 make smoke           # health da aplicação em :8080
+make seed SCALE=1    # APAGA e carrega o dataset (1 = referência; 0.01 para testes manuais rápidos)
 make down            # make clean também apaga o volume do Postgres
 ```
 
@@ -61,4 +64,4 @@ O JDK 25 vem do `.tool-versions` (asdf). Não setar `JAVA_HOME` para outro JDK.
 
 Comandos (`OpenAccount`, `Deposit`, `Withdraw`, `Transfer`) com idempotência e partida dobrada;
 consultas Q1–Q4 na `app-baseline`; seeder; OpenAPI + Swagger UI (springdoc 3.1.x). Detalhes do domínio
-e das consultas em `docs/SCOPE.md`. O aviso "No migrations found" do Flyway some quando o schema do M1 entrar.
+e das consultas em `docs/SCOPE.md`; contrato e dataset no ADR-0008.
