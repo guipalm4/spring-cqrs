@@ -20,7 +20,8 @@ resolvida de um jeito na v1 e de outro na v3 invalida a comparação. Três pont
 ### Dataset de referência
 
 - **Dois grupos de contas:** 1% empresariais (`holder_id` `seed-b-*`, 4.350–13.050 movimentos cada,
-  ~50% dos lançamentos) e 99% de pessoa física (`seed-r-*`, 17–158 movimentos). Movimentos: 30%
+  ~44% dos lançamentos, já que os créditos de transferência caem quase todos em contas de pessoa
+  física) e 99% de pessoa física (`seed-r-*`, 17–158 movimentos). Movimentos: 30%
   depósito, 55% saque, 15% transferência. Como cada transferência gera dois lançamentos e cada conta
   recebe um saldo inicial, ~17,4 milhões de movimentos resultam nos ~20 milhões de lançamentos do
   ADR-0005. O benchmark sorteia

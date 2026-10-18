@@ -4,7 +4,7 @@
 -- ATENÇÃO: seed.load apaga contas, lançamentos e chaves de idempotência antes de gerar.
 --
 -- Referência (scale = 1): 100 mil contas e ~20 milhões de lançamentos entre out/2024 e set/2026.
---   * 1% das contas são empresariais (holder_id seed-b-*): 4.350–13.050 movimentos cada (~50% do total).
+--   * 1% das contas são empresariais (holder_id seed-b-*): 4.350–13.050 movimentos cada (~44% dos lançamentos).
 --   * 99% são de pessoa física (holder_id seed-r-*): 17–158 movimentos cada.
 --   * ~17,4 mi movimentos viram ~20 mi lançamentos: cada transferência gera dois, e cada conta um saldo inicial.
 --   * Movimentos: 30% depósito, 55% saque, 15% transferência (gera o par OUT/IN em outra conta).
