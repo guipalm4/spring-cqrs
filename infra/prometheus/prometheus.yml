@@ -1,0 +1,9 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  # Só a aplicação da fase ativa responde; as demais aparecem como down.
+  - job_name: ledger
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: [app-baseline:8080, app-cqrs:8080]
