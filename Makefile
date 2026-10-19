@@ -1,8 +1,11 @@
 PHASE ?= v1
 COMPOSE := docker compose -f infra/compose.yaml --profile $(PHASE)
+SCALE ?= 1
+SALT ?= 42
+PSQL = $(COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U ledger -d ledger
 
 .DEFAULT_GOAL := help
-.PHONY: help verify up down clean ps logs smoke
+.PHONY: help verify up down clean ps logs smoke seed
 
 help: ## Lista os alvos
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk -F':.*## ' '{printf "  %-8s %s\n", $$1, $$2}'
@@ -29,3 +32,7 @@ smoke: ## Confere se a aplicação da fase está saudável
 	@for i in $$(seq 1 30); do \
 	  curl -fsS localhost:8080/actuator/health && echo && exit 0; sleep 2; \
 	done; echo "aplicação não respondeu" >&2; exit 1
+
+seed: ## Carrega o dataset (APAGA os dados): make seed SCALE=1 — referência, ver ADR-0008
+	$(PSQL) -q -f - < bench/seed/seed.sql
+	$(PSQL) -c "CALL seed.load($(SCALE), $(SALT))" -c "VACUUM (ANALYZE) account" -c "VACUUM (ANALYZE) ledger_entry"

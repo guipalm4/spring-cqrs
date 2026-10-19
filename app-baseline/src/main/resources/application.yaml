@@ -5,6 +5,16 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/ledger}
     username: ${DB_USER:ledger}
     password: ${DB_PASSWORD:ledger}
+  data:
+    jdbc:
+      # Fixo para o Spring Data JDBC não consultar o banco na partida (treino do AOT cache no Dockerfile).
+      dialect: postgresql
+  threads:
+    virtual:
+      enabled: true
+  mvc:
+    problemdetails:
+      enabled: true
 
 management:
   endpoints:
@@ -20,3 +30,7 @@ management:
     tags:
       application: ${spring.application.name}
       phase: v1
+
+springdoc:
+  default-produces-media-type: application/json
+  default-consumes-media-type: application/json

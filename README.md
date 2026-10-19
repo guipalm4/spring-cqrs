@@ -3,7 +3,9 @@
 Ledger financeiro que começa com um modelo único (leitura e escrita no mesmo Postgres) e evolui para
 CQRS, medindo a cada fase o que melhora e o que custa.
 
-> **Status:** M0 — fundação. Escopo, hipóteses e marcos em [docs/SCOPE.md](docs/SCOPE.md).
+> **Status:** M1 — v1 funcional: comandos idempotentes, consultas Q1–Q4, seeder e contrato OpenAPI.
+> Escopo, hipóteses e marcos em [docs/SCOPE.md](docs/SCOPE.md); contrato e dataset no
+> [ADR-0008](docs/adr/0008-contrato-v1-e-dataset.md).
 
 ## Fases
 
@@ -26,11 +28,15 @@ Pré-requisitos: JDK 25 e um runtime Docker com Compose v2.
 make verify          # build + testes (sobe Postgres via Testcontainers)
 make up PHASE=v1     # Postgres, app-baseline, Prometheus, Grafana
 make smoke           # confere a saúde da aplicação
+make seed SCALE=0.01 # APAGA e carrega um dataset (1 = referência: 100 mil contas, ~20 mi lançamentos)
 make down
 ```
 
 | Serviço | Endereço |
 |---|---|
 | Aplicação | http://localhost:8080/actuator/health |
+| Swagger UI | http://localhost:8080/swagger-ui.html |
+| Contrato OpenAPI | http://localhost:8080/v3/api-docs ([versionado](docs/api/openapi.json)) |
+| Collection Postman | [docs/api/ledger.postman_collection.json](docs/api/ledger.postman_collection.json) |
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 |
