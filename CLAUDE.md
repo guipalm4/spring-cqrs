@@ -60,8 +60,10 @@ O JDK 25 vem do `.tool-versions` (asdf). Não setar `JAVA_HOME` para outro JDK.
 - A imagem `eclipse-temurin:25-jre` não tem curl nem wget; o healthcheck do compose usa `/dev/tcp` do bash.
 - O health do Actuator só lista componentes com `management.endpoint.health.show-components: always`.
 
-## Marco atual: M1 — v1 funcional (issue #2)
+## Marco atual: M2 — Evidência do problema (issue #3)
 
-Comandos (`OpenAccount`, `Deposit`, `Withdraw`, `Transfer`) com idempotência e partida dobrada;
-consultas Q1–Q4 na `app-baseline`; seeder; OpenAPI + Swagger UI (springdoc 3.1.x). Detalhes do domínio
-e das consultas em `docs/SCOPE.md`; contrato e dataset no ADR-0008.
+Gatling (Java DSL, em `bench/`) e dashboards Grafana como código; resultados da v1 com `EXPLAIN ANALYZE`.
+Pronto quando `make bench PHASE=v1` reproduz e H1 está respondida em `docs/benchmarks/`. Metodologia no
+ADR-0005; o benchmark sorteia contas dos dois grupos do seed e reporta cada grupo separadamente (ADR-0008).
+A `app-baseline` congela ao fim deste marco: otimizações da v1 entram aqui, não depois.
+Sinal já visto no M1: Q4 numa conta empresarial levou ~1,7 s a frio — investigar o plano antes de medir.
