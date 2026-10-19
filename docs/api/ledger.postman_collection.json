@@ -1,0 +1,812 @@
+{
+  "info": {
+    "name": "spring-cqrs — Ledger API",
+    "description": "Endpoints do contrato v1 (`docs/api/openapi.json`). Suba com `make up PHASE=v1`.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Comandos",
+      "description": "Fluxo encadeado: rode a pasta em ordem (Runner) ou request a request. Valores em centavos. Cada request gera uma Idempotency-Key nova, exceto os de reenvio, que reaproveitam a do depósito.",
+      "item": [
+        {
+          "name": "Abrir conta A",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('accountId', pm.response.json().accountId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"holderId\": \"postman-{{$guid}}\",\n  \"holderName\": \"Ana Postman\",\n  \"currency\": \"BRL\",\n  \"overdraftLimit\": 0\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts"
+              ]
+            },
+            "description": "201 + Location. Guarda o id em `accountId`."
+          }
+        },
+        {
+          "name": "Abrir conta B",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set('otherAccountId', pm.response.json().accountId);"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"holderId\": \"postman-{{$guid}}\",\n  \"holderName\": \"Bruno Postman\",\n  \"currency\": \"BRL\",\n  \"overdraftLimit\": 5000\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/accounts",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts"
+              ]
+            },
+            "description": "Conta com limite de 5000 (R$ 50,00). Guarda o id em `otherAccountId`."
+          }
+        },
+        {
+          "name": "Depositar na conta A",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set('depositKey', pm.variables.replaceIn('{{$guid}}'));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{depositKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 10000,\n  \"currency\": \"BRL\",\n  \"category\": \"SALARY\",\n  \"description\": \"Salário outubro\",\n  \"counterparty\": \"Empresa Exemplo Ltda\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{accountId}}/deposits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "{{accountId}}",
+                "deposits"
+              ]
+            },
+            "description": "Gera e guarda a chave em `depositKey` para os exemplos de reenvio."
+          }
+        },
+        {
+          "name": "Sacar da conta A",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 2500,\n  \"currency\": \"BRL\",\n  \"category\": \"GROCERIES\",\n  \"description\": \"Feira semanal\",\n  \"counterparty\": \"Padaria Pão Quente\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{accountId}}/withdrawals",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "{{accountId}}",
+                "withdrawals"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Transferir A → B",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"sourceAccountId\": \"{{accountId}}\",\n  \"targetAccountId\": \"{{otherAccountId}}\",\n  \"amount\": 1000,\n  \"currency\": \"BRL\",\n  \"description\": \"Rateio do almoço\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/transfers",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "transfers"
+              ]
+            },
+            "description": "Gera dois lançamentos (TRANSFER_OUT e TRANSFER_IN) na mesma transação."
+          }
+        },
+        {
+          "name": "Reenviar o depósito (mesma chave)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 201', () => pm.response.to.have.status(201));",
+                  "pm.test('replay', () => pm.response.to.have.header('Idempotent-Replayed', 'true'));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{depositKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 10000,\n  \"currency\": \"BRL\",\n  \"category\": \"SALARY\",\n  \"description\": \"Salário outubro\",\n  \"counterparty\": \"Empresa Exemplo Ltda\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{accountId}}/deposits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "{{accountId}}",
+                "deposits"
+              ]
+            },
+            "description": "Mesma chave e mesmo corpo: devolve a resposta original sem lançar de novo, com `Idempotent-Replayed: true`."
+          }
+        },
+        {
+          "name": "Reusar a chave com outro corpo (422)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 422', () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{depositKey}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 99999,\n  \"currency\": \"BRL\",\n  \"category\": \"SALARY\",\n  \"description\": \"Salário outubro\",\n  \"counterparty\": \"Empresa Exemplo Ltda\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{accountId}}/deposits",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "{{accountId}}",
+                "deposits"
+              ]
+            },
+            "description": "Mesma chave, corpo diferente: 422 (problem+json)."
+          }
+        },
+        {
+          "name": "Sacar além do saldo (422)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 422', () => pm.response.to.have.status(422));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Idempotency-Key",
+                "value": "{{$guid}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 100000000,\n  \"currency\": \"BRL\",\n  \"category\": \"SHOPPING\",\n  \"description\": \"Compra grande\",\n  \"counterparty\": \"Loja Exemplo\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{accountId}}/withdrawals",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "{{accountId}}",
+                "withdrawals"
+              ]
+            },
+            "description": "Recusa de negócio `INSUFFICIENT_FUNDS`. Reenviar com a mesma chave devolve a mesma recusa."
+          }
+        },
+        {
+          "name": "Consultar conta A (Q1)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{accountId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "{{accountId}}"
+              ]
+            },
+            "description": "Saldo esperado após o fluxo: 10000 − 2500 − 1000 = 6500."
+          }
+        },
+        {
+          "name": "Extrato da conta A (Q2)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{accountId}}/statement?from=2026-01-01T00:00:00Z&to=2030-01-01T00:00:00Z&limit=50",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "{{accountId}}",
+                "statement"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-01-01T00:00:00Z"
+                },
+                {
+                  "key": "to",
+                  "value": "2030-01-01T00:00:00Z"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    },
+    {
+      "name": "Consultas (dataset seedado)",
+      "description": "Usam a conta empresarial `businessAccountId` (seed-b-0000001). Troque por `retailAccountId` para uma conta de pessoa física. Exigem `make seed` com o salt padrão (42).",
+      "item": [
+        {
+          "name": "Q1 — Conta",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{businessAccountId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "{{businessAccountId}}"
+              ]
+            },
+            "description": ""
+          }
+        },
+        {
+          "name": "Q2 — Extrato (primeira página)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const next = pm.response.json().nextCursor;",
+                  "pm.collectionVariables.set('cursor', next ?? '');",
+                  "console.log('cursor salvo:', next ?? '(última página)');",
+                  "pm.test('cursor salvo na collection', () => pm.expect(pm.collectionVariables.get('cursor')).to.eql(next ?? ''));",
+                  "if (pm.variables.get('cursor') !== pm.collectionVariables.get('cursor'))",
+                  "    console.warn('Há uma variável cursor em outro escopo (environment ou global) sobrepondo a da collection.');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{businessAccountId}}/statement?from=2026-01-01T00:00:00Z&to=2026-10-01T00:00:00Z&limit=50",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "{{businessAccountId}}",
+                "statement"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-01-01T00:00:00Z"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-10-01T00:00:00Z"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": "Período [from, to), mais recentes primeiro. Guarda `nextCursor` em `cursor`."
+          }
+        },
+        {
+          "name": "Q2 — Extrato (próxima página)",
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.variables.get('cursor')) throw new Error('cursor vazio: rode a primeira página antes (ou a página anterior foi a última).');"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));",
+                  "const next = pm.response.json().nextCursor;",
+                  "pm.collectionVariables.set('cursor', next ?? '');",
+                  "console.log('cursor salvo:', next ?? '(última página)');",
+                  "pm.test('cursor salvo na collection', () => pm.expect(pm.collectionVariables.get('cursor')).to.eql(next ?? ''));",
+                  "if (pm.variables.get('cursor') !== pm.collectionVariables.get('cursor'))",
+                  "    console.warn('Há uma variável cursor em outro escopo (environment ou global) sobrepondo a da collection.');"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{businessAccountId}}/statement?from=2026-01-01T00:00:00Z&to=2026-10-01T00:00:00Z&limit=50&cursor={{cursor}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "{{businessAccountId}}",
+                "statement"
+              ],
+              "query": [
+                {
+                  "key": "from",
+                  "value": "2026-01-01T00:00:00Z"
+                },
+                {
+                  "key": "to",
+                  "value": "2026-10-01T00:00:00Z"
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                },
+                {
+                  "key": "cursor",
+                  "value": "{{cursor}}"
+                }
+              ]
+            },
+            "description": "Usa o cursor da página anterior; o período e o limit precisam ser os mesmos."
+          }
+        },
+        {
+          "name": "Q3 — Resumo mensal",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{businessAccountId}}/monthly-summary?until=2026-09",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "{{businessAccountId}}",
+                "monthly-summary"
+              ],
+              "query": [
+                {
+                  "key": "until",
+                  "value": "2026-09"
+                }
+              ]
+            },
+            "description": "12 meses terminando em `until` (yyyy-MM), por categoria."
+          }
+        },
+        {
+          "name": "Q4 — Busca por texto",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{businessAccountId}}/entries/search?q=feira semanal&limit=50",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "{{businessAccountId}}",
+                "entries",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "q",
+                  "value": "feira semanal"
+                },
+                {
+                  "key": "counterparty",
+                  "value": "padaria",
+                  "disabled": true
+                },
+                {
+                  "key": "category",
+                  "value": "GROCERIES",
+                  "disabled": true
+                },
+                {
+                  "key": "from",
+                  "value": "2026-01-01T00:00:00Z",
+                  "disabled": true
+                },
+                {
+                  "key": "to",
+                  "value": "2026-10-01T00:00:00Z",
+                  "disabled": true
+                },
+                {
+                  "key": "minAmount",
+                  "value": "1000",
+                  "disabled": true
+                },
+                {
+                  "key": "maxAmount",
+                  "value": "50000",
+                  "disabled": true
+                },
+                {
+                  "key": "limit",
+                  "value": "50"
+                }
+              ]
+            },
+            "description": "Filtros combinados com E; ative os desabilitados para combinar. `q` exige todas as palavras (descrição ou contraparte); `counterparty` é trecho do nome; valores em módulo; ordenação por data."
+          }
+        },
+        {
+          "name": "Q4 — Busca por contraparte e valor",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('status 200', () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/accounts/{{businessAccountId}}/entries/search?counterparty=streaming&minAmount=1000&maxAmount=10000&limit=20",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "accounts",
+                "{{businessAccountId}}",
+                "entries",
+                "search"
+              ],
+              "query": [
+                {
+                  "key": "counterparty",
+                  "value": "streaming"
+                },
+                {
+                  "key": "minAmount",
+                  "value": "1000"
+                },
+                {
+                  "key": "maxAmount",
+                  "value": "10000"
+                },
+                {
+                  "key": "limit",
+                  "value": "20"
+                }
+              ]
+            },
+            "description": ""
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "businessAccountId",
+      "value": "fd129144-bdea-daf0-b11a-99c27b25c87a"
+    },
+    {
+      "key": "retailAccountId",
+      "value": "87f7dde5-94be-b011-1934-e428641ec001"
+    },
+    {
+      "key": "accountId",
+      "value": ""
+    },
+    {
+      "key": "otherAccountId",
+      "value": ""
+    },
+    {
+      "key": "depositKey",
+      "value": ""
+    },
+    {
+      "key": "cursor",
+      "value": ""
+    }
+  ]
+}

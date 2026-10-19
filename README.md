@@ -37,5 +37,6 @@ make down
 | Aplicação | http://localhost:8080/actuator/health |
 | Swagger UI | http://localhost:8080/swagger-ui.html |
 | Contrato OpenAPI | http://localhost:8080/v3/api-docs ([versionado](docs/api/openapi.json)) |
+| Collection Postman | [docs/api/ledger.postman_collection.json](docs/api/ledger.postman_collection.json) |
 | Prometheus | http://localhost:9090 |
 | Grafana | http://localhost:3000 |
