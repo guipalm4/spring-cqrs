@@ -74,7 +74,7 @@ app=$("${COMPOSE[@]}" ps --format '{{.Service}}' | grep -E '^app-|-api$' | head 
     echo "|---|---|---:|---:|"
     for id in $("${COMPOSE[@]}" ps -q); do
         docker inspect -f '{{.Name}} {{.Config.Image}} {{.HostConfig.NanoCpus}} {{.HostConfig.Memory}}' "$id" \
-            | awk '{ printf "| %s | %s | %.2f | %d MiB |\n", substr($1, 2), $2, $3 / 1e9, $4 / 1048576 }'
+            | LC_ALL=C awk '{ printf "| %s | %s | %.2f | %d MiB |\n", substr($1, 2), $2, $3 / 1e9, $4 / 1048576 }'
     done
     echo
     echo "## JVM ($app)"
@@ -167,4 +167,11 @@ for rep in $(seq 1 "$REPS"); do
 done
 
 java bench/Report.java summarize "$OUT"
+
+# Planos das consultas da fase, com o cache no estado em que a carga o deixou (ADR-0005, regra 5).
+if [[ -f bench/explain/$PHASE.sql ]]; then
+    log "EXPLAIN ANALYZE ($PHASE)"
+    "${COMPOSE[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U ledger -d ledger -qAt \
+        < "bench/explain/$PHASE.sql" > "$OUT/explain.md"
+fi
 log "pronto: $OUT/summary.md"
