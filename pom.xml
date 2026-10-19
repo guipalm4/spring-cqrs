@@ -23,6 +23,7 @@
         <module>ledger-domain</module>
         <module>app-baseline</module>
         <module>app-cqrs</module>
+        <module>bench</module>
     </modules>
 
     <properties>
