@@ -30,6 +30,9 @@ columns=(
     "pg_blks_read_per_s|sum(rate(pg_stat_database_blks_read{datname=\"ledger\"}[15s]))"
     "app_cpu|avg(process_cpu_usage)"
     "app_heap_mib|sum(jvm_memory_used_bytes{area=\"heap\"}) / 1048576"
+    # Fração do tempo com a JVM parada em GC: a pausa para todas as requisições, com ou sem conexão (ADR-0010). Uma
+    # pausa mais longa que a janela derruba a coleta e fica vazia aqui; o total por execução está no prometheus.csv.
+    "gc_pause_ratio|sum(rate(jvm_gc_pause_seconds_sum[15s]))"
 )
 
 tmp=$(mktemp -d)

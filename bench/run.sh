@@ -159,6 +159,8 @@ run() { # nome writeRate readRate rep
         echo "hikari_acquire_avg_s,$(prometheus "sum(increase(hikaricp_connections_acquire_seconds_sum[$window])) / sum(increase(hikaricp_connections_acquire_seconds_count[$window]))")"
         echo "hikari_usage_avg_s,$(prometheus "sum(increase(hikaricp_connections_usage_seconds_sum[$window])) / sum(increase(hikaricp_connections_usage_seconds_count[$window]))")"
         echo "app_cpu_avg,$(prometheus "avg(avg_over_time(process_cpu_usage[$window]))")"
+        # Tempo total com a JVM parada em GC na execução; o contador atravessa lacunas de coleta (pausas longas).
+        echo "gc_pause_total_s,$(prometheus "sum(increase(jvm_gc_pause_seconds_sum[$window]))")"
         echo "pg_blks_hit,$(prometheus "sum(increase(pg_stat_database_blks_hit{datname=\"ledger\"}[$window]))")"
         echo "pg_blks_read,$(prometheus "sum(increase(pg_stat_database_blks_read{datname=\"ledger\"}[$window]))")"
         # Por pool: no controle da #11, mostra se os comandos ainda esperam conexão quando as consultas fazem fila.
