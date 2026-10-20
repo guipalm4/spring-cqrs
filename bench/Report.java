@@ -2,6 +2,7 @@
 //
 //   java bench/Report.java extract <relatório-gatling> <stats.csv>   tabela do index.html -> CSV
 //   java bench/Report.java summarize <docs/benchmarks/...>           runs/*/r*/stats.csv -> summary.md
+//   java bench/Report.java chart <timeseries.csv> <coluna> <título> [divisor]   série -> gráfico Mermaid (stdout)
 //
 // O Gatling 3.16 não grava mais stats.json: as estatísticas só existem na tabela do index.html. Os percentis
 // incluem requisições OK e KO, e o resumo mostra o % de KO ao lado para não esconder falhas.
@@ -23,7 +24,10 @@ void main(String[] args) throws IOException {
     switch (args.length == 0 ? "" : args[0]) {
         case "extract" -> extract(Path.of(args[1], "index.html"), Path.of(args[2]));
         case "summarize" -> summarize(Path.of(args[1]));
-        default -> throw new IllegalArgumentException("uso: extract <relatório> <csv> | summarize <resultados>");
+        case "chart" -> System.out.print(chart(Path.of(args[1]), args[2], args[3],
+                args.length > 4 ? Double.parseDouble(args[4]) : 1));
+        default -> throw new IllegalArgumentException(
+                "uso: extract <relatório> <csv> | summarize <resultados> | chart <timeseries.csv> <coluna> <título> [divisor]");
     }
 }
 
@@ -130,6 +134,8 @@ void summarize(Path results) throws IOException {
 void states(Path runs, StringBuilder out) throws IOException {
     var counts = new StringBuilder();
     var table = new StringBuilder();
+    var labels = new ArrayList<String>();
+    var commandP95 = new ArrayList<Double>();
     for (var scenario : subdirectories(runs)) {
         var reps = subdirectories(scenario).stream().filter(dir -> Files.exists(dir.resolve("stats.csv"))).toList();
         var collapsed = new ArrayList<String>();
@@ -141,6 +147,10 @@ void states(Path runs, StringBuilder out) throws IOException {
             boolean collapse = global.get("p95") > COLLAPSE_P95_MS;
             if (collapse) {
                 collapsed.add(rep.getFileName().toString());
+            }
+            if (!Double.isNaN(commands.get("p95"))) {
+                labels.add(scenario.getFileName() + " " + rep.getFileName());
+                commandP95.add(commands.get("p95") / 1000);
             }
             table.append("| ").append(scenario.getFileName()).append(" | ").append(rep.getFileName())
                     .append(" | ").append(collapse ? "**colapso**" : "estável")
@@ -176,6 +186,52 @@ void states(Path runs, StringBuilder out) throws IOException {
             | Cenário | Rep. | Estado | p95 global | % KO | Comandos p50 | p95 | p99 | Espera no pool | Uso da conexão | Comando no banco |
             |---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
             """).append(table);
+    if (!labels.isEmpty()) {
+        out.append("\n").append(mermaid("bar", "p95 dos comandos por execução", labels, "segundos", commandP95));
+    }
+}
+
+/** Uma coluna do timeseries.csv como gráfico de linha; recusa série com lacunas, que o Mermaid desenharia contínua. */
+String chart(Path csv, String column, String title, double divisor) throws IOException {
+    var lines = Files.readAllLines(csv);
+    int index = List.of(lines.getFirst().split(",")).indexOf(column);
+    if (index < 0) {
+        throw new IllegalArgumentException("coluna inexistente: " + column);
+    }
+    var values = new ArrayList<Double>();
+    for (var line : lines.subList(1, lines.size())) {
+        var cells = line.split(",", -1);
+        if (cells[index].isBlank()) {
+            throw new IllegalArgumentException("lacuna em t=" + cells[0] + "; escolha outra execução");
+        }
+        values.add(Double.parseDouble(cells[index]) / divisor);
+    }
+    var last = lines.getLast().split(",")[0];
+    return """
+            ```mermaid
+            xychart-beta
+                title "%s"
+                x-axis "segundos desde o início" 0 --> %s
+                line [%s]
+            ```
+            """.formatted(title, last, join(values));
+}
+
+static String mermaid(String type, String title, List<String> labels, String unit, List<Double> values) {
+    return """
+            ```mermaid
+            xychart-beta
+                title "%s"
+                x-axis [%s]
+                y-axis "%s"
+                %s [%s]
+            ```
+            """.formatted(title, labels.stream().map(l -> "\"" + l + "\"").collect(Collectors.joining(", ")), unit, type,
+            join(values));
+}
+
+static String join(List<Double> values) {
+    return values.stream().map(v -> String.format(Locale.ROOT, "%.2f", v)).collect(Collectors.joining(", "));
 }
 
 /** Soma do tempo médio das instruções que um comando executa; sem escritas (só leitura), não se aplica. */

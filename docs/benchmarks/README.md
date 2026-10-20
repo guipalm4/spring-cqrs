@@ -13,7 +13,7 @@ Metodologia no [ADR-0005](../adr/0005-metodologia-de-benchmark.md); revisão da 
 | Arquivo | O que é |
 |---|---|
 | `README.md` | Análise e resposta às hipóteses (escrita à mão) |
-| `summary.md` | Estado de cada execução (estável ou colapso) e colapsos por cenário; mediana e faixa das repetições por requisição; pool e banco |
+| `summary.md` | Estado de cada execução (estável ou colapso), colapsos por cenário e gráfico do p95 dos comandos; mediana e faixa das repetições por requisição; pool e banco |
 | `env.md` | Commit, hardware, runtime, limites dos containers, flags da JVM, configuração do Postgres |
 | `explain.md` | `EXPLAIN (ANALYZE, BUFFERS)` de Q1–Q4 depois da carga |
 | `runs/<cenário>/r<n>/stats.csv` | Tabela do relatório do Gatling (percentis incluem requisições com KO) |

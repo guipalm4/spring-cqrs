@@ -46,9 +46,12 @@ O JDK 25 vem do `.tool-versions` (asdf). Não setar `JAVA_HOME` para outro JDK.
 
 1. Mover o card do marco para *In Progress* no board (GitHub Project #5 de `guipalm4`).
 2. Branch `mN-<nome>` a partir da `main`.
-3. Ao terminar: `make verify` + `make up`/`smoke` locais → PR com `Closes #<issue>` → CI verde.
-4. Squash merge, apagar a branch, `git tag -a mN`, push da tag, marcar os checkboxes da issue.
-5. Atualizar a seção "Marco atual" abaixo para o próximo marco.
+3. Escrever o capítulo do marco em "A história" no README: pergunta, evidência (gráfico gerado pelo
+   `bench/Report.java`, não desenhado à mão), decisão, custo e limites, com links para os dados. O marco não
+   fecha sem ele; resultado desfavorável ao CQRS entra igual.
+4. Ao terminar: `make verify` + `make up`/`smoke` locais → PR com `Closes #<issue>` → CI verde.
+5. Squash merge, apagar a branch, `git tag -a mN`, push da tag, marcar os checkboxes da issue.
+6. Atualizar a seção "Marco atual" abaixo para o próximo marco.
 
 ## Armadilhas já resolvidas
 

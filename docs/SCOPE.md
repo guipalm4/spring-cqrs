@@ -90,7 +90,7 @@ Cognito e serviços gerenciados emulados (MSK, OpenSearch Service, DocumentDB) �
 
 ## Marcos
 
-Cada marco é publicável sozinho (tag + PR + nota no README).
+Cada marco é publicável sozinho (tag + PR + capítulo da história no README).
 
 | Marco | Entrega | Critério de pronto |
 |---|---|---|

@@ -144,6 +144,14 @@ execução. Comando no banco: soma do tempo médio das instruções de escrita e
 | s3-r075 | r2 | estável | 2,155 | 0.0 | 26 | 2,090 | 2,958 | 394.0 | 59.4 | 4.6 |
 | s3-r075 | r3 | **colapso** | 30,335 | 11.9 | 9 | 30,335 | 34,766 | 6,903.1 | 83.9 | 5.1 |
 
+```mermaid
+xychart-beta
+    title "p95 dos comandos por execução"
+    x-axis ["s1 r1", "s1 r2", "s1 r3", "s3-r025 r1", "s3-r025 r2", "s3-r025 r3", "s3-r050 r1", "s3-r050 r2", "s3-r050 r3", "s3-r075 r1", "s3-r075 r2", "s3-r075 r3"]
+    y-axis "segundos"
+    bar [0.04, 0.04, 0.05, 0.04, 0.48, 0.07, 23.48, 29.86, 0.25, 44.27, 2.09, 30.34]
+```
+
 ## Pool e banco por cenário
 
 Mediana das repetições. Espera = tempo médio para obter conexão do Hikari; uso = tempo médio com a
