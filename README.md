@@ -3,9 +3,10 @@
 Ledger financeiro que começa com um modelo único (leitura e escrita no mesmo Postgres) e evolui para
 CQRS, medindo a cada fase o que melhora e o que custa.
 
-> **Status:** M2 — evidência do problema: benchmark reproduzível (`make bench`) e H1 confirmada na v1 — a
-> leitura degrada a escrita pela fila no pool compartilhado; com 50 consultas/s ou mais, o sistema
-> colapsou em 6 de 9 execuções ([resultados](docs/benchmarks/2026-10-19-v1/README.md)).
+> **Status:** controle da #11 — separar o pool de comandos não protege a escrita: no colapso, a JVM compartilhada
+> para tudo em GC ([resultados](docs/benchmarks/2026-10-20-v1-split/README.md)). Antes, no M2, H1 confirmada na v1:
+> a leitura degrada a escrita, e com 50 consultas/s ou mais o sistema colapsa
+> ([resultados](docs/benchmarks/2026-10-19-v1/README.md)).
 > Escopo, hipóteses e marcos em [docs/SCOPE.md](docs/SCOPE.md); contrato e dataset no
 > [ADR-0008](docs/adr/0008-contrato-v1-e-dataset.md).
 
@@ -88,7 +89,68 @@ Dados: [análise completa](docs/benchmarks/2026-10-19-v1/README.md) · [estado p
 
 **Pergunta.** Um pool só para comandos, com o mesmo total de conexões, elimina a degradação da escrita sem
 mudar a arquitetura? Se sim, o argumento do CQRS para a escrita (H3) enfraquece, e o que sobra para ele é a
-leitura. *A medir.*
+leitura.
+
+**Antes de medir, a regra.** A variante liga por profile, sem mudar a v1: 2 conexões para comandos e 8 para
+consultas, divisão fixada a partir do uso de conexão dos comandos no M2, e o que contaria como "basta" e "não basta"
+escrito antes da medição ([ADR-0010](docs/adr/0010-controle-pools-separados.md)).
+
+**Um tropeço no caminho.** Comparada à v1 do capítulo 1, a variante parecia resolver: 2 colapsos em 9 contra 6.
+Mas o S1, que só tem escrita e não depende dos pools, também ficou ~40% mais rápido, com o mesmo ambiente declarado.
+A v1 foi medida de novo no mesmo dia e colapsou em 3 de 9. A diferença era do dia, não dos pools. Desde então,
+fases só se comparam com a v1 medida no mesmo dia.
+
+**Evidência.** Mesmo protocolo do capítulo 1, as duas no mesmo dia, cada uma com o dataset recarregado.
+
+<!-- java bench/Report.java summarize docs/benchmarks/2026-10-20-v1 -->
+```mermaid
+xychart-beta horizontal
+    title "v1: p95 dos comandos por execução (20/10)"
+    x-axis ["só escrita, r1", "só escrita, r2", "só escrita, r3", "25 consultas/s, r1", "25 consultas/s, r2", "25 consultas/s, r3", "50 consultas/s, r1", "50 consultas/s, r2", "50 consultas/s, r3", "75 consultas/s, r1", "75 consultas/s, r2", "75 consultas/s, r3"]
+    y-axis "segundos"
+    bar [0.02, 0.02, 0.05, 0.02, 0.02, 0.05, 0.02, 0.21, 0.81, 0.04, 40.79, 18.76]
+```
+
+<!-- java bench/Report.java summarize docs/benchmarks/2026-10-20-v1-split -->
+```mermaid
+xychart-beta horizontal
+    title "Pools separados: p95 dos comandos por execução (20/10)"
+    x-axis ["só escrita, r1", "só escrita, r2", "só escrita, r3", "25 consultas/s, r1", "25 consultas/s, r2", "25 consultas/s, r3", "50 consultas/s, r1", "50 consultas/s, r2", "50 consultas/s, r3", "75 consultas/s, r1", "75 consultas/s, r2", "75 consultas/s, r3"]
+    y-axis "segundos"
+    bar [0.03, 0.03, 0.05, 0.07, 0.02, 0.03, 0.13, 0.18, 15.02, 0.13, 0.05, 0.07]
+```
+
+Com leitura a 50/s ou mais, a v1 colapsou em 3 de 9 execuções e a variante em 2 de 9, o que não é diferença com três
+repetições. No colapso, os comandos caem junto mesmo com pool próprio: p95 de 15 s e 23% de falhas. Fora dele, as
+faixas de p95 se sobrepõem.
+
+**Mecanismo.** O pool de comandos fica livre até a JVM parar. No colapso, milhares de consultas esperando enchem o
+heap, e o GC passa a pausar a aplicação inteira:
+
+| Execução | Comando no banco | Comando segurando a conexão | JVM parada em GC (de 180 s) |
+|---|---:|---:|---:|
+| Pools separados, colapso (50 consultas/s, r3) | 13 ms | 110 ms | 64 s |
+| Pools separados, 13 execuções estáveis | 2–5 ms | 5–16 ms | ≤ 2,4 s |
+
+A pausa para também os comandos que já têm conexão. Com 110 ms por comando, 20 comandos/s ocupam 2,2 conexões, mais
+que as 2 do pool, e o pool de comandos faz fila também. Separar as conexões não separa o heap.
+
+**O que mudou no entendimento.** O capítulo 1 disse que o canal era o pool. É onde as requisições esperam, mas o
+colapso se sustenta pela JVM compartilhada: a fila enche o heap, e o GC atrasa todo mundo.
+
+**Decisão.** A v1 continua com o pool compartilhado (o controle não mudou o resultado), e H3 segue em aberto com um
+alvo mais preciso: o que a v3 tem e esta variante não tem é um processo próprio para a escrita. Falta uma correção
+barata que ataca o heap: contrapressão (recusar consultas em excesso em vez de enfileirá-las). Sem medi-la, parte do
+ganho da v3 pode não ser do CQRS.
+
+**Limites.** Três repetições só mostram diferenças grandes na frequência de colapso; a variação entre dias é do
+tamanho do efeito procurado; a divisão 2 + 8 foi dimensionada para o uso normal da conexão, e com o GC o pool de
+comandos saturou (uma terceira conexão não evitaria 64 s de pausa). As séries do controle foram exportadas de novo
+depois do resultado para incluir o GC.
+
+Dados: [análise completa](docs/benchmarks/2026-10-20-v1-split/README.md) ·
+[estado por execução, pools separados](docs/benchmarks/2026-10-20-v1-split/summary.md) ·
+[v1 no mesmo dia](docs/benchmarks/2026-10-20-v1/README.md)
 
 ### 3. Separar o modelo: CQRS lógico (v2, M3)
 

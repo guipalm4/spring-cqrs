@@ -66,3 +66,7 @@ fila e conexões ativas dos pools (com um pool, o valor é o mesmo de antes).
 - O isolamento é só de conexões. Comandos e consultas continuam dividindo o Postgres e a JVM: no colapso do M2, o
   heap chegou a 1.000 MiB de 1.024 MiB com milhares de requisições esperando, e isso não muda com dois pools.
 - O controle roda a mesma imagem da v1; o profile do Spring fica registrado no `env.md` de cada execução.
+- **Comparação só com a v1 do mesmo dia** (acrescentado depois da medição): a mesma v1 colapsou em 6 de 9 em 19/10
+  e em 3 de 9 em 20/10, e o S1 ficou ~40% mais rápido, com o ambiente declarado idêntico. Toda fase passa a ser
+  comparada com a v1 medida no mesmo dia, com o dataset recarregado antes de cada uma: cada comparação custa mais
+  ~1h40 de benchmark. [Resultado do controle](../benchmarks/2026-10-20-v1-split/README.md).

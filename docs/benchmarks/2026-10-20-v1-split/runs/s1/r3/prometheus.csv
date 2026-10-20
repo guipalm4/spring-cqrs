@@ -1,0 +1,17 @@
+metric,value
+hikari_pending_max,16
+hikari_pending_avg,0.4444444444444444
+hikari_active_avg,0.4166666666666667
+hikari_acquire_max_s,2.164485709
+hikari_acquire_avg_s,0.004757469801086463
+hikari_usage_avg_s,0.010971428571428564
+app_cpu_avg,0.059415464189601086
+pg_blks_hit,336563.99999999994
+pg_blks_read,137103.42857142855
+hikari_acquire_avg_s_commands,0.004757469801086462
+hikari_acquire_avg_s_queries,NaN
+hikari_usage_avg_s_commands,0.010971428571428566
+hikari_usage_avg_s_queries,NaN
+hikari_pending_max_commands,16
+hikari_pending_max_queries,0
+gc_pause_total_s,0.14800493349778154

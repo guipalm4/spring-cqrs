@@ -1,0 +1,18 @@
+name,total,ok,ko,pct_ko,rps,min,p50,p75,p95,p99,max,mean,stddev
+Global,8100,8100,0,0,45,0,6,13,50,227,5815,18,87
+comandos,3600,3600,0,0,20,2,5,8,20,195,818,12,42
+comandos / deposit pessoa,528,528,0,0,2.93,3,5,8,21,212,547,12,40
+comandos / withdraw empresa,982,982,0,0,5.46,2,5,7,18,193,719,11,40
+comandos / withdraw pessoa,994,994,0,0,5.52,2,5,8,21,176,818,12,42
+comandos / deposit empresa,568,568,0,0,3.16,2,5,7,22,293,680,13,51
+comandos / transfer empresa,279,279,0,0,1.55,4,7,10,22,149,503,13,39
+comandos / transfer pessoa,249,249,0,0,1.38,4,7,9,20,59,430,11,28
+consultas,4500,4500,0,0,25,1,8,19,71,245,5815,23,110
+consultas / Q3 pessoa,565,565,0,0,3.14,1,3,5,13,53,463,7,28
+consultas / Q4 empresa,552,552,0,0,3.07,7,44,75,173,651,5815,82,278
+consultas / Q2 empresa,589,589,0,0,3.27,3,18,26,54,534,981,32,77
+consultas / Q3 empresa,562,562,0,0,3.12,5,15,20,37,222,589,21,40
+consultas / Q1 empresa,547,547,0,0,3.04,0,2,3,9,143,266,5,22
+consultas / Q4 pessoa,548,548,0,0,3.04,2,7,12,33,187,1153,16,57
+consultas / Q1 pessoa,601,601,0,0,3.34,0,2,3,11,82,499,6,33
+consultas / Q2 pessoa,536,536,0,0,2.98,1,8,12,24,223,675,15,48

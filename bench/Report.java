@@ -163,6 +163,7 @@ void states(Path runs, StringBuilder out) throws IOException {
                     .append(" | ").append(fmt(metrics.getOrDefault("hikari_acquire_avg_s", Double.NaN) * 1000, 1))
                     .append(" | ").append(fmt(metrics.getOrDefault("hikari_usage_avg_s", Double.NaN) * 1000, 1))
                     .append(" | ").append(fmt(commandDbTime(rep.resolve("pg_stat_statements.csv")), 1))
+                    .append(" | ").append(fmt(metrics.getOrDefault("gc_pause_total_s", Double.NaN), 1))
                     .append(" |\n");
         }
         counts.append("| ").append(scenario.getFileName()).append(" | ").append(collapsed.size()).append(" de ")
@@ -182,10 +183,11 @@ void states(Path runs, StringBuilder out) throws IOException {
 
             p95 global e comandos em ms, no cliente (Gatling). Espera e uso da conexão do Hikari em ms, média da
             execução. Comando no banco: soma do tempo médio das instruções de escrita e do `SELECT … FOR UPDATE` no
-            `pg_stat_statements`, em ms (o custo de um comando dentro do Postgres, sem a fila).
+            `pg_stat_statements`, em ms (o custo de um comando dentro do Postgres, sem a fila). GC: segundos com a JVM
+            parada em GC na execução (medido a partir da #11).
 
-            | Cenário | Rep. | Estado | p95 global | % KO | Comandos p50 | p95 | p99 | Espera no pool | Uso da conexão | Comando no banco |
-            |---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+            | Cenário | Rep. | Estado | p95 global | % KO | Comandos p50 | p95 | p99 | Espera no pool | Uso da conexão | Comando no banco | GC |
+            |---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
             """).append(table);
     if (!labels.isEmpty()) {
         out.append("\n").append(mermaid("bar", "p95 dos comandos por execução", labels, "segundos", commandP95));
@@ -193,16 +195,18 @@ void states(Path runs, StringBuilder out) throws IOException {
 }
 
 /**
- * Espera, uso e fila de cada pool do Hikari por execução, quando o prometheus.csv tem as métricas por pool. No
+ * Espera, uso e fila de cada pool do Hikari por execução, quando há mais de um pool (com um, repetiria o total). No
  * controle da #11 (ADR-0010), mostra se os comandos ainda esperam conexão quando as consultas fazem fila.
  */
 void pools(Path runs, StringBuilder out) throws IOException {
     var table = new StringBuilder();
+    boolean split = false;
     for (var scenario : subdirectories(runs)) {
         for (var rep : subdirectories(scenario)) {
             var metrics = loadMetrics(List.of(rep));
             var pools = metrics.keySet().stream().filter(key -> key.startsWith("hikari_acquire_avg_s_"))
                     .map(key -> key.substring("hikari_acquire_avg_s_".length())).sorted().toList();
+            split |= pools.size() > 1;
             for (var pool : pools) {
                 table.append("| ").append(scenario.getFileName()).append(" | ").append(rep.getFileName())
                         .append(" | ").append(pool)
@@ -213,7 +217,7 @@ void pools(Path runs, StringBuilder out) throws IOException {
             }
         }
     }
-    if (table.isEmpty()) {
+    if (!split) {
         return;
     }
     out.append("""

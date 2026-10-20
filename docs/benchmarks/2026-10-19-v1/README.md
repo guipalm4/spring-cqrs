@@ -111,6 +111,9 @@ dispara a fila, e o modelo aberto, como num serviço real, não reduz a chegada 
 - **Coleta do Prometheus falhou no colapso:** em 10 instantes de 5 s, todos em execuções com colapso, a
   aplicação não respondeu ao `/actuator/prometheus` e a linha do `timeseries.csv` ficou vazia. Causa não
   investigada.
+- **Atualização (#11):** a mesma v1, medida de novo em 20/10, colapsou em 3 de 9, não em 6; e, medido o GC, os
+  colapsos daquele dia pararam a JVM por 8–35 s em 180 s. As falhas de coleta acima são compatíveis com essas
+  pausas, mas esta execução não mediu GC. Ver [o controle da #11](../2026-10-20-v1-split/README.md).
 - **`timeseries.csv` exportado depois:** as séries desta execução foram extraídas do Prometheus em 2026-10-20,
   com a janela de cada execução tirada do `docker-stats.csv`. As fases seguintes as exportam durante o `run.sh`.
 - **`hikari_acquire_max_s` em `prometheus.csv` não é confiável:** o máximo do Micrometer decai em janelas e
