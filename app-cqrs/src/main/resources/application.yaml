@@ -8,6 +8,16 @@ spring:
     hikari:
       # Explícito porque entra no benchmark: o mesmo tamanho de pool por instância em todas as fases (ADR-0009).
       maximum-pool-size: 10
+  data:
+    jdbc:
+      # Fixo para o Spring Data JDBC não consultar o banco na partida (treino do AOT cache no Dockerfile).
+      dialect: postgresql
+  threads:
+    virtual:
+      enabled: true
+  mvc:
+    problemdetails:
+      enabled: true
 
 management:
   endpoints:
@@ -27,3 +37,7 @@ management:
     tags:
       application: ${spring.application.name}
       phase: ${LEDGER_PHASE:v2}
+
+springdoc:
+  default-produces-media-type: application/json
+  default-consumes-media-type: application/json

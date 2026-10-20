@@ -72,13 +72,16 @@ O JDK 25 vem do `.tool-versions` (asdf). Não setar `JAVA_HOME` para outro JDK.
   janelas e herdam o valor da execução anterior. Usar totais (`increase` de `_sum`), como o `gc_pause_total_s`.
 - Gatling 3.16 não gera `stats.json`; `bench/Report.java` extrai a tabela do `index.html`.
 - O Prometheus não tem volume: séries somem com o container. O `run.sh` exporta `timeseries.csv` na hora.
+- v1 e v2 têm históricos do Flyway diferentes no mesmo volume: trocar de fase exige `make clean` + `make up` +
+  `make seed`. Na v2, o `make seed` também reconstrói as projeções (`bench/seed/rebuild.sql`).
 - `docker-credential-desktop` pode travar (prompt do Keychain); imagens públicas baixam com
   `DOCKER_CONFIG` apontando para um `config.json` vazio.
 
 ## Marco atual: M3 — v2, CQRS lógico (issue #4)
 
-Projeções no mesmo Postgres (`statement_view`, `monthly_summary`, `tsvector` na projeção), atualizadas na
-mesma transação do comando, construídas a partir do ledger já carregado pelo seed (ADR-0008). Pronto
+Projeções no mesmo Postgres, atualizadas na transação do comando e reconstruídas do ledger após o seed: blocos
+conta/mês em `statement_view` (a forma do documento da v3) e `monthly_summary` (ADR-0011). **Escopo congelado até o
+M6 (ADR-0011):** nada de novos controles ou variantes; o que aparecer vira limite declarado ou discussão no M6. Pronto
 quando os resultados v1×v2 estão em `docs/benchmarks/` e H2 e H4 respondidas.
 Lições do M2 e da #11: a fila se forma no pool do Hikari, mas o colapso se sustenta pela JVM (heap cheio, GC
 parando tudo); pools separados não protegem a escrita (ADR-0010). O Q4 é ~80% do tempo de leitura. Mesmas taxas

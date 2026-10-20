@@ -59,9 +59,9 @@ v1, v2 e v3.
 | Consulta | v1 | v2 | v3 (M4) | v3 (M5) |
 |---|---|---|---|---|
 | Q1 | `account.balance` | idem | idem (lado de escrita) | idem |
-| Q2 | Joins sobre `ledger_entry` | Tabela `statement_view` desnormalizada | MongoDB (doc por conta/mês) | MongoDB |
+| Q2 | Joins sobre `ledger_entry` | `statement_view`: um bloco por conta/mês ([ADR-0011](adr/0011-v2-projecoes-e-escopo-congelado.md)) | MongoDB (doc por conta/mês) | MongoDB |
 | Q3 | `GROUP BY` sobre `ledger_entry` | Tabela `monthly_summary` pré-agregada | MongoDB | MongoDB |
-| Q4 | `pg_trgm` + full-text (`tsvector`) | Coluna `tsvector` na projeção | MongoDB text index | **OpenSearch** |
+| Q4 | `pg_trgm` + full-text (`tsvector`) | `tsvector` do bloco na projeção | MongoDB text index | **OpenSearch** |
 
 Q4 no Mongo (M4) é deliberado: cria o ponto de comparação "store genérico × store especializado" que
 justifica o OpenSearch no M5.
@@ -103,7 +103,7 @@ Cada marco é publicável sozinho (tag + PR + capítulo da história no README).
 | **M6 — Relato** | README comparativo, ADR "quando NÃO usar CQRS" | README conta a história com gráficos e links para cada tag |
 | **M7 — Camada AWS** | LocalStack + Terraform (`tflocal`); API Gateway roteando comandos → `command-api` e consultas → `query-api`; credenciais no Secrets Manager; `docs/aws-mapping.md` | `make aws-up` provisiona tudo do zero; chamadas via gateway funcionam; limitações do emulador documentadas |
 
-A tese do projeto está completa no M6. O M7 é um complemento: se o projeto parar antes dele, nada
+A tese do projeto está completa no M6, e o escopo até lá está congelado ([ADR-0011](adr/0011-v2-projecoes-e-escopo-congelado.md)). O M7 é um complemento: se o projeto parar antes dele, nada
 fica pela metade.
 
 **Stretch (fora do caminho crítico):** reconstrução de projeção a partir do ledger; Debezium como
@@ -138,3 +138,4 @@ docs/            # SCOPE, ADRs, benchmarks/
 | [0008](adr/0008-contrato-v1-e-dataset.md) | Contrato REST, semântica de Q1–Q4 e dataset de referência (distribuição assimétrica) |
 | [0009](adr/0009-revisao-da-baseline-e-parametros-do-benchmark.md) | Revisão da baseline v1 (estatística, GIN compostos, Postgres e JVM) e parâmetros do benchmark |
 | [0010](adr/0010-controle-pools-separados.md) | Controle da #11: v1 com pools separados para comandos (2) e consultas (8), sem mudar a baseline |
+| [0011](adr/0011-v2-projecoes-e-escopo-congelado.md) | v2: projeções em blocos por conta e mês (forma do documento da v3); escopo congelado até o M6 |
