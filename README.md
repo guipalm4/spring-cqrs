@@ -11,6 +11,11 @@ CQRS, medindo a cada fase o que melhora e o que custa.
 
 ## A história
 
+Esta é a história de como um problema comum de um modelo único leva ao CQRS: uma aplicação tradicional, com
+a baseline bem ajustada, que falha sob carga mista, e a evolução em fases até leitura e escrita com modelos
+próprios. Cada passo é justificado por medição, e a alternativa mais barata é medida antes da mais cara, para
+que o ganho do CQRS seja atribuível a ele.
+
 Cada capítulo é um marco: a pergunta, a medição que a responde, a decisão que ela motivou e o que custou.
 Os números vêm de `make bench`, os gráficos são gerados pelo `bench/Report.java` a partir dos dados
 versionados, e cada capítulo aponta para os dados brutos. Resultados desfavoráveis ao CQRS entram também.
