@@ -23,6 +23,10 @@ columns=(
     "hikari_active|sum(hikaricp_connections_active)"
     "hikari_acquire_avg_ms|1000 * sum(rate(hikaricp_connections_acquire_seconds_sum[15s])) / sum(rate(hikaricp_connections_acquire_seconds_count[15s]))"
     "hikari_usage_avg_ms|1000 * sum(rate(hikaricp_connections_usage_seconds_sum[15s])) / sum(rate(hikaricp_connections_usage_seconds_count[15s]))"
+    # Só no controle da #11 (pools "commands" e "queries", ADR-0010); vazias com um pool compartilhado.
+    "commands_pool_pending|sum(hikaricp_connections_pending{pool=\"commands\"})"
+    "commands_pool_acquire_avg_ms|1000 * sum(rate(hikaricp_connections_acquire_seconds_sum{pool=\"commands\"}[15s])) / sum(rate(hikaricp_connections_acquire_seconds_count{pool=\"commands\"}[15s]))"
+    "queries_pool_pending|sum(hikaricp_connections_pending{pool=\"queries\"})"
     "pg_blks_read_per_s|sum(rate(pg_stat_database_blks_read{datname=\"ledger\"}[15s]))"
     "app_cpu|avg(process_cpu_usage)"
     "app_heap_mib|sum(jvm_memory_used_bytes{area=\"heap\"}) / 1048576"

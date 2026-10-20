@@ -137,3 +137,4 @@ docs/            # SCOPE, ADRs, benchmarks/
 | [0007](adr/0007-ambiente-de-execucao.md) | Ambiente de execução: Docker, imagens, profiles do compose, limites de recursos |
 | [0008](adr/0008-contrato-v1-e-dataset.md) | Contrato REST, semântica de Q1–Q4 e dataset de referência (distribuição assimétrica) |
 | [0009](adr/0009-revisao-da-baseline-e-parametros-do-benchmark.md) | Revisão da baseline v1 (estatística, GIN compostos, Postgres e JVM) e parâmetros do benchmark |
+| [0010](adr/0010-controle-pools-separados.md) | Controle da #11: v1 com pools separados para comandos (2) e consultas (8), sem mudar a baseline |

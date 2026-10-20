@@ -104,6 +104,7 @@ void summarize(Path results) throws IOException {
         }
     }
     states(runs, out);
+    pools(runs, out);
     out.append("""
 
             ## Pool e banco por cenário
@@ -189,6 +190,42 @@ void states(Path runs, StringBuilder out) throws IOException {
     if (!labels.isEmpty()) {
         out.append("\n").append(mermaid("bar", "p95 dos comandos por execução", labels, "segundos", commandP95));
     }
+}
+
+/**
+ * Espera, uso e fila de cada pool do Hikari por execução, quando o prometheus.csv tem as métricas por pool. No
+ * controle da #11 (ADR-0010), mostra se os comandos ainda esperam conexão quando as consultas fazem fila.
+ */
+void pools(Path runs, StringBuilder out) throws IOException {
+    var table = new StringBuilder();
+    for (var scenario : subdirectories(runs)) {
+        for (var rep : subdirectories(scenario)) {
+            var metrics = loadMetrics(List.of(rep));
+            var pools = metrics.keySet().stream().filter(key -> key.startsWith("hikari_acquire_avg_s_"))
+                    .map(key -> key.substring("hikari_acquire_avg_s_".length())).sorted().toList();
+            for (var pool : pools) {
+                table.append("| ").append(scenario.getFileName()).append(" | ").append(rep.getFileName())
+                        .append(" | ").append(pool)
+                        .append(" | ").append(fmt(metrics.getOrDefault("hikari_acquire_avg_s_" + pool, Double.NaN) * 1000, 1))
+                        .append(" | ").append(fmt(metrics.getOrDefault("hikari_usage_avg_s_" + pool, Double.NaN) * 1000, 1))
+                        .append(" | ").append(fmt(metrics.getOrDefault("hikari_pending_max_" + pool, Double.NaN), 0))
+                        .append(" |\n");
+            }
+        }
+    }
+    if (table.isEmpty()) {
+        return;
+    }
+    out.append("""
+
+            ## Pools por execução
+
+            Espera e uso da conexão do Hikari em ms, média da execução; fila máxima de requisições esperando conexão.
+            Pool sem requisições na execução aparece com —.
+
+            | Cenário | Rep. | Pool | Espera | Uso da conexão | Fila máx. |
+            |---|---|---|---:|---:|---:|
+            """).append(table);
 }
 
 /** Uma coluna do timeseries.csv como gráfico de linha; recusa série com lacunas, que o Mermaid desenharia contínua. */

@@ -13,7 +13,7 @@ help: ## Lista os alvos
 verify: ## Compila e roda todos os testes (Testcontainers)
 	./mvnw -B -ntp verify
 
-up: ## Sobe a fase: make up PHASE=v1|v2
+up: ## Sobe a fase: make up PHASE=v1|v1-split|v2 (v1-split: controle da #11, ADR-0010)
 	$(COMPOSE) up -d --build --wait
 
 down: ## Derruba a fase, mantendo o volume do Postgres
