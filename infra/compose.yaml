@@ -3,10 +3,15 @@
 
 name: spring-cqrs
 
+# Flags da JVM: entram no treino do AOT cache (build arg) e na execução (env) — o cache só vale com as mesmas.
+# Sem MaxRAMPercentage a JVM usa 25% do container como heap (256 MB de 1 GB); ADR-0009.
+x-jvm-opts: &jvm-opts "-XX:MaxRAMPercentage=75"
+
 x-app-env: &app-env
   DB_URL: jdbc:postgresql://postgres:5432/ledger
   DB_USER: ledger
   DB_PASSWORD: ledger
+  JVM_OPTS: *jvm-opts
 
 x-app-healthcheck: &app-healthcheck
   # A imagem JRE não tem curl; o bash abre a conexão HTTP direto.
@@ -23,7 +28,23 @@ services:
       POSTGRES_DB: ledger
       POSTGRES_USER: ledger
       POSTGRES_PASSWORD: ledger
-    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements"]
+    # Configuração dimensionada para o container (2 CPUs, 2 GB) e comum a todas as fases (ADR-0009).
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - shared_buffers=512MB
+      - -c
+      - effective_cache_size=1536MB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=256MB
+      - -c
+      - random_page_cost=1.1
+      - -c
+      - track_io_timing=on
     volumes:
       - ./postgres/init:/docker-entrypoint-initdb.d:ro
       - postgres-data:/var/lib/postgresql
@@ -41,6 +62,7 @@ services:
       context: ..
       args:
         MODULE: app-baseline
+        JVM_OPTS: *jvm-opts
     image: spring-cqrs/app-baseline:local
     profiles: [v1]
     environment: *app-env
@@ -57,6 +79,7 @@ services:
       context: ..
       args:
         MODULE: app-cqrs
+        JVM_OPTS: *jvm-opts
     image: spring-cqrs/app-cqrs:local
     profiles: [v2]
     environment:
@@ -69,6 +92,20 @@ services:
         condition: service_healthy
     cpus: 2
     mem_limit: 1g
+
+  # Métricas do Postgres para o Grafana (buffer hit ratio, conexões, locks); pg_stat_statements vem do make bench.
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.20.1
+    profiles: [v1, v2, v3]
+    environment:
+      DATA_SOURCE_URI: postgres:5432/ledger?sslmode=disable
+      DATA_SOURCE_USER: ledger
+      DATA_SOURCE_PASS: ledger
+    depends_on:
+      postgres:
+        condition: service_healthy
+    cpus: 0.25
+    mem_limit: 128m
 
   prometheus:
     image: prom/prometheus:v3.15.0

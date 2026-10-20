@@ -5,6 +5,9 @@ spring:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/ledger}
     username: ${DB_USER:ledger}
     password: ${DB_PASSWORD:ledger}
+    hikari:
+      # Explícito porque entra no benchmark: o mesmo tamanho de pool por instância em todas as fases (ADR-0009).
+      maximum-pool-size: 10
   data:
     jdbc:
       # Fixo para o Spring Data JDBC não consultar o banco na partida (treino do AOT cache no Dockerfile).
@@ -27,6 +30,10 @@ management:
       probes:
         enabled: true
   metrics:
+    distribution:
+      # Buckets de histograma: o Grafana calcula p95/p99 por endpoint com histogram_quantile.
+      percentiles-histogram:
+        http.server.requests: true
     tags:
       application: ${spring.application.name}
       phase: v1

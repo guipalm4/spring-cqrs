@@ -25,6 +25,7 @@ make verify          # build + testes (Testcontainers; precisa de Docker)
 make up PHASE=v1     # sobe a fase e espera ficar saudável (v1 | v2)
 make smoke           # health da aplicação em :8080
 make seed SCALE=1    # APAGA e carrega o dataset (1 = referência; 0.01 para testes manuais rápidos)
+make bench PHASE=v1  # benchmark da fase no ar (~1h20 com SCALE=1) -> docs/benchmarks/<data>-<fase>/
 make down            # make clean também apaga o volume do Postgres
 ```
 
@@ -45,9 +46,12 @@ O JDK 25 vem do `.tool-versions` (asdf). Não setar `JAVA_HOME` para outro JDK.
 
 1. Mover o card do marco para *In Progress* no board (GitHub Project #5 de `guipalm4`).
 2. Branch `mN-<nome>` a partir da `main`.
-3. Ao terminar: `make verify` + `make up`/`smoke` locais → PR com `Closes #<issue>` → CI verde.
-4. Squash merge, apagar a branch, `git tag -a mN`, push da tag, marcar os checkboxes da issue.
-5. Atualizar a seção "Marco atual" abaixo para o próximo marco.
+3. Escrever o capítulo do marco em "A história" no README: pergunta, evidência (gráfico gerado pelo
+   `bench/Report.java`, não desenhado à mão), decisão, custo e limites, com links para os dados. O marco não
+   fecha sem ele; resultado desfavorável ao CQRS entra igual.
+4. Ao terminar: `make verify` + `make up`/`smoke` locais → PR com `Closes #<issue>` → CI verde.
+5. Squash merge, apagar a branch, `git tag -a mN`, push da tag, marcar os checkboxes da issue.
+6. Atualizar a seção "Marco atual" abaixo para o próximo marco.
 
 ## Armadilhas já resolvidas
 
@@ -59,11 +63,21 @@ O JDK 25 vem do `.tool-versions` (asdf). Não setar `JAVA_HOME` para outro JDK.
 - O AOT cache só vale com as mesmas flags da JVM do treino: flags vão em `JVM_OPTS` (build arg e env).
 - A imagem `eclipse-temurin:25-jre` não tem curl nem wget; o healthcheck do compose usa `/dev/tcp` do bash.
 - O health do Actuator só lista componentes com `management.endpoint.health.show-components: always`.
+- Heap da JVM: sem `-XX:MaxRAMPercentage` a JVM usa 25% do container. A flag vai em `x-jvm-opts` do
+  compose (build arg e env), senão o AOT cache não vale.
+- `make bench` exige o dataset de referência e leva ~1h20; feche outros containers da VM antes. O working
+  set é maior que o cache: o estado do cache muda o resultado, então nunca calibrar e medir na mesma sessão
+  sem recarregar o seed.
+- Gatling 3.16 não gera `stats.json`; `bench/Report.java` extrai a tabela do `index.html`.
+- O Prometheus não tem volume: séries somem com o container. O `run.sh` exporta `timeseries.csv` na hora.
+- `docker-credential-desktop` pode travar (prompt do Keychain); imagens públicas baixam com
+  `DOCKER_CONFIG` apontando para um `config.json` vazio.
 
-## Marco atual: M2 — Evidência do problema (issue #3)
+## Marco atual: M3 — v2, CQRS lógico (issue #4)
 
-Gatling (Java DSL, em `bench/`) e dashboards Grafana como código; resultados da v1 com `EXPLAIN ANALYZE`.
-Pronto quando `make bench PHASE=v1` reproduz e H1 está respondida em `docs/benchmarks/`. Metodologia no
-ADR-0005; o benchmark sorteia contas dos dois grupos do seed e reporta cada grupo separadamente (ADR-0008).
-A `app-baseline` congela ao fim deste marco: otimizações da v1 entram aqui, não depois.
-Sinal já visto no M1: Q4 numa conta empresarial levou ~1,7 s a frio — investigar o plano antes de medir.
+Projeções no mesmo Postgres (`statement_view`, `monthly_summary`, `tsvector` na projeção), atualizadas na
+mesma transação do comando, construídas a partir do ledger já carregado pelo seed (ADR-0008). Pronto
+quando os resultados v1×v2 estão em `docs/benchmarks/` e H2 e H4 respondidas.
+Antes: a issue #11 (controle "v1 com pools separados") — sem ela, o ganho da v2 não é atribuível.
+Lição do M2: a v1 colapsa por fila no pool do Hikari, não por contenção no Postgres; o Q4 é ~80% do tempo
+de leitura. Mesmas taxas do ADR-0009 em todas as fases; ler "colapsou em k de 3", não a mediana.
