@@ -145,9 +145,9 @@ execução. Comando no banco: soma do tempo médio das instruções de escrita e
 | s3-r075 | r3 | **colapso** | 30,335 | 11.9 | 9 | 30,335 | 34,766 | 6,903.1 | 83.9 | 5.1 |
 
 ```mermaid
-xychart-beta
+xychart-beta horizontal
     title "p95 dos comandos por execução"
-    x-axis ["s1 r1", "s1 r2", "s1 r3", "s3-r025 r1", "s3-r025 r2", "s3-r025 r3", "s3-r050 r1", "s3-r050 r2", "s3-r050 r3", "s3-r075 r1", "s3-r075 r2", "s3-r075 r3"]
+    x-axis ["só escrita, r1", "só escrita, r2", "só escrita, r3", "25 consultas/s, r1", "25 consultas/s, r2", "25 consultas/s, r3", "50 consultas/s, r1", "50 consultas/s, r2", "50 consultas/s, r3", "75 consultas/s, r1", "75 consultas/s, r2", "75 consultas/s, r3"]
     y-axis "segundos"
     bar [0.04, 0.04, 0.05, 0.04, 0.48, 0.07, 23.48, 29.86, 0.25, 44.27, 2.09, 30.34]
 ```
