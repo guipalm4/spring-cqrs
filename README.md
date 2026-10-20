@@ -3,10 +3,10 @@
 Ledger financeiro que começa com um modelo único (leitura e escrita no mesmo Postgres) e evolui para
 CQRS, medindo a cada fase o que melhora e o que custa.
 
-> **Status:** controle da #11 — separar o pool de comandos não protege a escrita: no colapso, a JVM compartilhada
-> para tudo em GC ([resultados](docs/benchmarks/2026-10-20-v1-split/README.md)). Antes, no M2, H1 confirmada na v1:
-> a leitura degrada a escrita, e com 50 consultas/s ou mais o sistema colapsa
-> ([resultados](docs/benchmarks/2026-10-19-v1/README.md)).
+> **Status:** M3 — a v2 (CQRS lógico) deixou as consultas de 3 a 8 vezes menos dependentes do disco, a +40% de custo
+> por comando no banco; nesta rodada, nem a v1 colapsou ([resultados](docs/benchmarks/2026-10-20-v2/README.md)). Antes:
+> no M2, a leitura derruba a escrita na v1 ([resultados](docs/benchmarks/2026-10-19-v1/README.md)); na #11, separar os
+> pools não protege a escrita ([resultados](docs/benchmarks/2026-10-20-v1-split/README.md)).
 > Escopo, hipóteses e marcos em [docs/SCOPE.md](docs/SCOPE.md); contrato e dataset no
 > [ADR-0008](docs/adr/0008-contrato-v1-e-dataset.md).
 
@@ -154,8 +154,89 @@ Dados: [análise completa](docs/benchmarks/2026-10-20-v1-split/README.md) ·
 
 ### 3. Separar o modelo: CQRS lógico (v2, M3)
 
-**Pergunta.** Projeções no mesmo Postgres, atualizadas na transação do comando, dão às consultas de uma
-conta a localidade que o ledger não tem? Quanto isso custa na escrita? (H2, H4) *A medir.*
+**Pergunta.** Projeções no mesmo Postgres, atualizadas na transação do comando, dão às consultas de uma conta a
+localidade que o ledger não tem? Quanto isso custa na escrita? (H2, H4)
+
+**Antes de medir, a forma e a regra.** Uma projeção com uma linha por lançamento teria a mesma dispersão da
+`ledger_entry`. A v2 guarda um bloco por conta e mês, com os lançamentos já no formato do extrato num `jsonb`, as
+palavras do bloco num `tsvector` e os totais mensais numa tabela à parte. É o documento que o MongoDB vai guardar na
+v3. A `ledger_entry` perdeu os índices que só serviam à leitura, e um teste confere que a v2 responde exatamente
+como o SQL da v1 sobre o mesmo ledger. A forma e o que contaria como confirmação foram escritos antes da medição
+([ADR-0011](docs/adr/0011-v2-projecoes-e-escopo-congelado.md)).
+
+**Evidência.** Mesmo protocolo dos capítulos anteriores, v1 e v2 no mesmo dia, cada uma com o dataset recarregado.
+
+<!-- java bench/Report.java summarize docs/benchmarks/2026-10-20-v1-m3 -->
+```mermaid
+xychart-beta horizontal
+    title "v1: p95 dos comandos por execução (20/10, tarde)"
+    x-axis ["só escrita, r1", "só escrita, r2", "só escrita, r3", "25 consultas/s, r1", "25 consultas/s, r2", "25 consultas/s, r3", "50 consultas/s, r1", "50 consultas/s, r2", "50 consultas/s, r3", "75 consultas/s, r1", "75 consultas/s, r2", "75 consultas/s, r3"]
+    y-axis "segundos"
+    bar [0.02, 0.02, 0.02, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.02, 0.01]
+```
+
+<!-- java bench/Report.java summarize docs/benchmarks/2026-10-20-v2 -->
+```mermaid
+xychart-beta horizontal
+    title "v2: p95 dos comandos por execução (20/10, tarde)"
+    x-axis ["só escrita, r1", "só escrita, r2", "só escrita, r3", "25 consultas/s, r1", "25 consultas/s, r2", "25 consultas/s, r3", "50 consultas/s, r1", "50 consultas/s, r2", "50 consultas/s, r3", "75 consultas/s, r1", "75 consultas/s, r2", "75 consultas/s, r3"]
+    y-axis "segundos"
+    bar [0.03, 0.02, 0.02, 0.01, 0.02, 0.02, 0.02, 0.01, 0.02, 1.62, 0.01, 0.02]
+```
+
+Nenhuma das duas colapsou. A v1 desta tarde é a mesma que colapsou em 6 de 9 no dia 19 e em 3 de 9 hoje de manhã.
+O que mudou entre as três foi o tempo para ler uma página fora do cache do Postgres:
+
+| v1 | Colapsos com leitura ≥ 50/s | Tempo por página lida fora do cache |
+|---|---:|---:|
+| 19/10 | 6 de 9 | 1,8–4,1 ms |
+| 20/10, manhã | 3 de 9 | 0,31–2,2 ms |
+| 20/10, tarde | 0 de 9 | 0,17–0,21 ms |
+
+Sem uma v1 que colapse para comparar, o que dá para afirmar está no custo de cada consulta:
+
+| No banco, por chamada, 25 consultas/s | v1 | v2 |
+|---|---:|---:|
+| Q3: tempo / páginas tocadas | 6,0 ms / 4.558 | 1,6 ms / 199 |
+| Q2 + Q4: tempo / páginas tocadas | 14,5 ms / 369 | 11,2 ms / 104 |
+| Q2 + Q4: páginas lidas fora do cache | 58,7 | 16,9 |
+
+| p95 no cliente | v1 | v2 |
+|---|---:|---:|
+| Q3 empresa, 25 consultas/s | 25 ms | 11 ms |
+| Q2 empresa, 25 consultas/s | 25 ms | 23 ms |
+| Q4 empresa, 25 consultas/s | 85 ms | 68 ms |
+| Q4 empresa, 75 consultas/s | 134 ms | 60 ms |
+| Q1 (as duas contas), 25 consultas/s | 6 ms | 7–8 ms |
+| Comandos, só escrita | 22 ms | 23 ms |
+
+**H2 confirmada:** o Q3 empresarial caiu mais da metade (−56%) e o Q2 bem menos (−8%). O maior ganho em tempo, porém,
+ficou fora do H2, no Q4. **H4 confirmada no que afirma:** o Q1 não melhorou. Ele ficou 1–2 ms acima da faixa da v1, o
+que o critério combinado não previa, com o mesmo custo no banco.
+
+**O custo.** No benchmark, cada comando gasta ~0,7 ms a mais no Postgres (+40%): o lançamento ficou mais barato sem os
+índices de leitura, mas as duas projeções somam 1,5 ms. No cliente, a diferença some no ruído. Esse número é otimista:
+os comandos do benchmark caem num mês cujos blocos começam vazios. Num bloco cheio, um lançamento custa 2,9 ms e
+grava 104 KB no WAL, porque o mês é reescrito inteiro. A v2 também ocupa 8,9 GB contra 7,2 GB e leva o dobro do tempo
+no seed.
+
+**O que mudou no entendimento.** O colapso do M2 é real, mas depende de leituras lentas: com o disco rápido, nem a v1
+cai. A v2 ataca exatamente esse ponto, porque cada consulta precisa de 3 a 8 vezes menos páginas fora do cache. Que
+isso a proteja quando o disco fica lento é inferência: hoje não houve disco lento para testar.
+
+**Decisão.** A v2 fica como está e vira a segunda referência do M4. Não entra nenhum controle novo
+(ADR-0011): a latência do disco passa a acompanhar cada comparação, ao lado da contagem de colapsos. O argumento da v3
+fica mais estreito. Ela precisa mostrar o que um processo próprio para a escrita dá além de leituras mais baratas,
+e a comparação com a v2 do mesmo dia é que vai dizer isso.
+
+**Limites.** A v1 de referência não colapsou, então "separar o modelo evita o colapso" ficou sem resposta. A latência do
+disco, que decide o colapso, não é controlada pelo benchmark. Os blocos vazios subestimam a escrita, e a sonda a mede à
+parte. Na v2, uma execução teve 15 s de lentidão no banco, que se resolveu sozinha e cuja causa não foi identificada.
+No `pg_stat_statements`, Q2 e Q4 da v2 aparecem somados. São três repetições por cenário.
+
+Dados: [análise completa](docs/benchmarks/2026-10-20-v2/README.md) ·
+[estado por execução, v2](docs/benchmarks/2026-10-20-v2/summary.md) ·
+[v1 no mesmo dia](docs/benchmarks/2026-10-20-v1-m3/README.md) · [planos e sonda de escrita](docs/benchmarks/2026-10-20-v2/explain.md)
 
 ### 4. Separar o armazenamento: CQRS físico (v3, M4)
 

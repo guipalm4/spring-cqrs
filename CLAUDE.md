@@ -74,16 +74,19 @@ O JDK 25 vem do `.tool-versions` (asdf). Não setar `JAVA_HOME` para outro JDK.
 - O Prometheus não tem volume: séries somem com o container. O `run.sh` exporta `timeseries.csv` na hora.
 - v1 e v2 têm históricos do Flyway diferentes no mesmo volume: trocar de fase exige `make clean` + `make up` +
   `make seed`. Na v2, o `make seed` também reconstrói as projeções (`bench/seed/rebuild.sql`).
+- A latência de ler uma página fora do `shared_buffers` (`read_ms / shared_blks_read` no `pg_stat_statements`) variou de
+  4 ms a 0,2 ms entre execuções da mesma v1 e decide se ela colapsa (6, 3 e 0 em 9). Informar junto de toda comparação.
+- O `pg_stat_statements.csv` guarda 400 caracteres por instrução: na v2, Q2 e Q4 têm o mesmo começo e aparecem somados.
 - `docker-credential-desktop` pode travar (prompt do Keychain); imagens públicas baixam com
   `DOCKER_CONFIG` apontando para um `config.json` vazio.
 
-## Marco atual: M3 — v2, CQRS lógico (issue #4)
+## Marco atual: M4 — v3, CQRS físico (issue #5)
 
-Projeções no mesmo Postgres, atualizadas na transação do comando e reconstruídas do ledger após o seed: blocos
-conta/mês em `statement_view` (a forma do documento da v3) e `monthly_summary` (ADR-0011). **Escopo congelado até o
-M6 (ADR-0011):** nada de novos controles ou variantes; o que aparecer vira limite declarado ou discussão no M6. Pronto
-quando os resultados v1×v2 estão em `docs/benchmarks/` e H2 e H4 respondidas.
-Lições do M2 e da #11: a fila se forma no pool do Hikari, mas o colapso se sustenta pela JVM (heap cheio, GC
-parando tudo); pools separados não protegem a escrita (ADR-0010). O Q4 é ~80% do tempo de leitura. Mesmas taxas
-do ADR-0009 em todas as fases; ler "colapsou em k de 3", não a mediana. Comparar só com a v1 medida no mesmo
-dia (seed recarregado antes de cada uma): entre dois dias, a mesma v1 foi de 6 para 3 colapsos em 9.
+`command-api` (Postgres) e `query-api` (MongoDB) em containers separados, sincronizados por outbox (Spring Modulith)
+→ Kafka → projetor. O documento do Mongo é o bloco conta/mês da v2 (ADR-0011), então da v2 para a v3 mudam só o
+armazenamento e a consistência. Pronto quando os resultados v1×v2×v3 estão em `docs/benchmarks/`, H3, H5 e H7 respondidas
+e há trace ponta a ponta no Grafana. **Escopo congelado até o M6 (ADR-0011).**
+Lições até o M3: o colapso da v1 depende de leituras lentas (com o disco rápido, nem a v1 colapsa); a v2 lê 3–8 vezes
+menos páginas fora do cache e custa +40% por comando no banco (2,9 ms e 104 KB de WAL num bloco cheio). No colapso, o
+canal é a JVM compartilhada (heap e GC), não só o pool (ADR-0010): é isso que a v3 precisa mostrar que resolve. Medir
+v1, v2 e v3 no mesmo dia, cada uma com o seed recarregado, e ler "colapsou em k de 9" ao lado do tempo por página lida.

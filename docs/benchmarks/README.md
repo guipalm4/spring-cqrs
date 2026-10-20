@@ -9,6 +9,8 @@ Metodologia no [ADR-0005](../adr/0005-metodologia-de-benchmark.md); revisão da 
 | [2026-10-19-v1](2026-10-19-v1/) | v1 | H1 | [análise](2026-10-19-v1/README.md) |
 | [2026-10-20-v1](2026-10-20-v1/) | v1 | Referência do mesmo dia para a #11 | [nota](2026-10-20-v1/README.md) |
 | [2026-10-20-v1-split](2026-10-20-v1-split/) | v1, pools separados | Controle da #11 (H3) | [análise](2026-10-20-v1-split/README.md) |
+| [2026-10-20-v2](2026-10-20-v2/) | v2 | H2, H4 | [análise](2026-10-20-v2/README.md) |
+| [2026-10-20-v1-m3](2026-10-20-v1-m3/) | v1 | Referência do mesmo dia para a v2 | [nota](2026-10-20-v1-m3/README.md) |
 
 ## Conteúdo de uma execução
 
@@ -32,9 +34,12 @@ make seed SCALE=1      # ~20 min; APAGA os dados
 make bench PHASE=v1    # ~1h20: aquecimento + 3 repetições de S1, S3 (3 taxas) e S2
 ```
 
+A v2 usa `PHASE=v2`; trocar de fase exige `make clean` antes do `make up` (ADR-0011).
+
 O controle da [#11](https://github.com/guipalm4/spring-cqrs/issues/11) (v1 com pools separados,
 [ADR-0010](../adr/0010-controle-pools-separados.md)) usa `PHASE=v1-split` nos três comandos.
 
 Comparações valem entre execuções **do mesmo dia, na mesma máquina** (ADR-0007, ADR-0010): a latência no macOS
-inclui a VM do Docker, e a mesma v1 variou de 6 para 3 colapsos em 9 entre dois dias.
+inclui a VM do Docker, e a mesma v1 foi de 6 para 3 e depois 0 colapsos em 9. O que acompanhou a variação foi o tempo por bloco lido fora
+do cache (`read_ms / shared_blks_read` no `pg_stat_statements`), de 4 ms a 0,2 ms: informe-o junto da contagem.
 Feche outros containers antes de medir.
