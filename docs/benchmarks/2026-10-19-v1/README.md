@@ -13,7 +13,7 @@ Escrita constante de 20 comandos/s; leitura de 0 (S1), 25, 50 e 75 consultas/s (
 
 **Confirmada, com duas correções no enunciado:**
 
-1. **O canal é o pool de conexões, não o Postgres.** Dentro do banco, um comando custa 3–7 ms em qualquer
+1. **O canal é o pool de conexões, não o Postgres.** Dentro do banco, um comando custa 3–8 ms em qualquer
    cenário; no cliente, o p95 vai de 44 ms (sem leitura) a 23–44 s (com leitura a ≥ 50/s). Mais de 99% da
    degradação é espera por uma das 10 conexões do Hikari, que as consultas limitadas por I/O seguram.
 2. **A leitura que pesa é o Q4, não Q2/Q3.** O Q4 consome 58–81% do tempo de leitura no banco, o Q2
@@ -25,7 +25,8 @@ Com leitura a 50 ou 75/s, colapsou em 6 de 9 execuções; a 25/s, em nenhuma.
 
 ## Comandos por execução
 
-Estado *colapso*: p95 acima de 5 s. "Espera no pool" é a média de todas as requisições (comandos e
+Estado *colapso*: p95 global acima de 5 s, critério fixo para todas as fases (ADR-0009); o `summary.md` classifica
+cada execução e conta os colapsos por cenário. "Espera no pool" é a média de todas as requisições (comandos e
 consultas); "comando no banco" soma o tempo médio das cinco instruções de um comando no
 `pg_stat_statements` (INSERT do lançamento, `SELECT … FOR UPDATE`, UPDATE do saldo, INSERT e UPDATE da
 idempotência).
@@ -41,7 +42,7 @@ idempotência).
 | s3-r050 | r1 | 821 | 23,476 | 30,010 | 1.2 | 6,352.3 ms | 8.1 ms | colapso |
 | s3-r050 | r2 | 5,223 | 29,859 | 30,494 | 6.8 | 9,432.1 ms | 7.8 ms | colapso |
 | s3-r050 | r3 | 8 | 254 | 819 | 0.0 | 33.2 ms | 4.3 ms | estável |
-| s3-r075 | r1 | 935 | 44,268 | 48,547 | 20.4 | 12,126.1 ms | 7.1 ms | colapso |
+| s3-r075 | r1 | 935 | 44,268 | 48,547 | 20.4 | 12,126.1 ms | 7.0 ms | colapso |
 | s3-r075 | r2 | 26 | 2,090 | 2,958 | 0.0 | 394.0 ms | 4.6 ms | estável |
 | s3-r075 | r3 | 9 | 30,335 | 34,766 | 12.0 | 6,903.1 ms | 5.1 ms | colapso |
 
@@ -107,6 +108,11 @@ dispara a fila, e o modelo aberto, como num serviço real, não reduz a chegada 
   sem causa identificada (Tomcat ou o port-forward do Docker Desktop). Só ocorre no colapso.
 - **Memória da aplicação:** com heap em 75% do container, o pico no colapso foi de 1.000 MiB para um limite
   de 1.024 MiB. Não houve OOM nem reinício, mas a margem é pequena.
+- **Coleta do Prometheus falhou no colapso:** em 10 instantes de 5 s, todos em execuções com colapso, a
+  aplicação não respondeu ao `/actuator/prometheus` e a linha do `timeseries.csv` ficou vazia. Causa não
+  investigada.
+- **`timeseries.csv` exportado depois:** as séries desta execução foram extraídas do Prometheus em 2026-10-20,
+  com a janela de cada execução tirada do `docker-stats.csv`. As fases seguintes as exportam durante o `run.sh`.
 - **`hikari_acquire_max_s` em `prometheus.csv` não é confiável:** o máximo do Micrometer decai em janelas e
   carrega valores da execução anterior. Use a espera média.
 - **Execução com alterações locais** (`env.md`): sobre o commit `3d32327`, só o passo de `EXPLAIN` no fim do

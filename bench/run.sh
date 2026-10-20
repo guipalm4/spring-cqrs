@@ -3,8 +3,8 @@
 #
 # Pré-requisitos: a fase no ar (make up PHASE=...) e o dataset carregado (make seed SCALE=1).
 # Saída: docs/benchmarks/<data>-<fase>/ com env.md, summary.md e runs/<cenário>/r<n>/ (estatísticas do Gatling,
-# pg_stat_statements, docker stats e métricas do Prometheus). Os relatórios HTML completos ficam em
-# bench/target/gatling/.
+# pg_stat_statements, docker stats, métricas do Prometheus e série temporal). Os relatórios HTML completos ficam
+# em bench/target/gatling/.
 #
 # Cenários (mesma simulação, taxas diferentes):
 #   s1        só escrita, WRITE_RATE comandos/s
@@ -116,26 +116,30 @@ run() { # nome writeRate readRate rep
         docker stats --no-stream --format "{{.Name}},{{.CPUPerc}},{{.MemUsage}},{{.BlockIO}}" $("${COMPOSE[@]}" ps -q) \
             | sed "s/^/$(date +%s),/"
     done) > "$dir/docker-stats.csv" &
-    local sampler=$!
+    local sampler=$! start
+    start=$(date +%s)
 
     # Semente por repetição: cada repetição sorteia outras contas, e a mesma repetição sorteia as mesmas
     # contas em todas as fases.
     gatling "$write" "$read" "$DURATION" $((100 + rep)) > "$dir/gatling.log" 2>&1 || {
         kill "$sampler"; tail -40 "$dir/gatling.log" >&2; exit 1; }
     kill "$sampler"; wait "$sampler" 2> /dev/null || true
+    bench/timeseries.sh "$dir" "$start" "$(date +%s)"
 
     local report
     report=$(ls -td bench/target/gatling/ledgersimulation-* | head -1)
     echo "${report#bench/target/gatling/}" > "$dir/gatling-report.txt"
     java bench/Report.java extract "$report" "$dir/stats.csv"
 
+    # 50 linhas: as instruções de um comando (summary.md, "comando no banco") não podem cair fora do corte quando
+    # as leituras e as consultas do postgres-exporter dominam o tempo.
     psql_ -c "\copy (SELECT calls, round(total_exec_time) AS total_ms, round(mean_exec_time::numeric, 2) AS mean_ms,
                             round(stddev_exec_time::numeric, 2) AS stddev_ms, rows, shared_blks_hit, shared_blks_read,
                             round(shared_blk_read_time) AS read_ms,
                             left(regexp_replace(query, '\s+', ' ', 'g'), 400) AS query
                      FROM pg_stat_statements
                      WHERE dbid = (SELECT oid FROM pg_database WHERE datname = 'ledger') AND calls > 1
-                     ORDER BY total_exec_time DESC LIMIT 25) TO STDOUT WITH CSV HEADER" > "$dir/pg_stat_statements.csv"
+                     ORDER BY total_exec_time DESC LIMIT 50) TO STDOUT WITH CSV HEADER" > "$dir/pg_stat_statements.csv"
 
     local window="${DURATION}s"
     {

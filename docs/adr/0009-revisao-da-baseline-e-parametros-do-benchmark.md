@@ -65,8 +65,14 @@ Efeito medido a frio, em contas empresariais ainda não lidas:
   mesmas contas em todas as fases.
 - **Aquecimento** de 5 minutos, descartado. **3 repetições de 3 minutos**, intercaladas entre os
   cenários, para a deriva do cache e do autovacuum se espalhar. Reporta-se a mediana e a faixa.
-- **Saída versionada:** tabelas extraídas do relatório do Gatling, `pg_stat_statements`, `docker stats` e
-  métricas do Prometheus por execução, mais `env.md` e `summary.md`. Os relatórios HTML completos (~1 MB
+- **Estado de cada execução:** *colapso* quando o p95 global no cliente passa de 5 s, senão *estável*. O
+  critério vale para todas as fases e está no `bench/Report.java`; compara-se "colapsou em k de n" por
+  cenário. Na v1, as execuções estáveis ficaram com p95 até 2,7 s e as em colapso a partir de 21,7 s, então o
+  limiar não decide nenhum caso de fronteira; se uma fase cair entre os dois, isso se reporta, sem mudar o
+  critério.
+- **Saída versionada:** tabelas extraídas do relatório do Gatling, `pg_stat_statements`, `docker stats`,
+  métricas do Prometheus e a série temporal a cada 5 s por execução, mais `env.md` e `summary.md`. O
+  Prometheus não tem volume, então a série é exportada ao fim de cada execução, não depois. Os relatórios HTML completos (~1 MB
   cada) ficam em `bench/target/`, fora do Git.
 
 ## Alternativas consideradas

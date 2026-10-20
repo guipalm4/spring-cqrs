@@ -2,7 +2,8 @@
 
 Gerado por `java bench/Report.java summarize`. Mediana das repetições; entre colchetes, a faixa do p95
 (mín–máx). Latências em ms, vazão em requisições/s. Parâmetros de cada cenário em
-`runs/<cenário>/scenario.properties`.
+`runs/<cenário>/scenario.properties`; série temporal de cada execução (5 s) em
+`runs/<cenário>/r<n>/timeseries.csv`.
 
 ## s1 (3 execuções)
 
@@ -108,14 +109,40 @@ Gerado por `java bench/Report.java summarize`. Mediana das repetições; entre c
 | consultas / Q4 empresa | 8.1 | 12.1 | 426 | 32,113 [2,772–44,878] | 36,971 |
 | consultas / Q4 pessoa | 7.6 | 11.7 | 54 | 30,274 [2,187–45,809] | 35,485 |
 
-## Comandos por cenário (H1)
+## Estado por execução
 
-| Cenário | p50 | p95 | p99 |
-|---|---:|---:|---:|
-| s1 | 10 | 44 | 288 |
-| s3-r025 | 7 | 66 | 700 |
-| s3-r050 | 821 | 23,476 | 30,010 |
-| s3-r075 | 26 | 30,335 | 34,766 |
+Colapso: p95 global acima de 5,000 ms (ADR-0009). Leia a contagem, não a mediana: perto da saturação as
+repetições caem em estados diferentes.
+
+| Cenário | Colapsou |
+|---|---|
+| s1 | 0 de 3 |
+| s2 | 2 de 3 (r1, r2) |
+| s3-r025 | 0 de 3 |
+| s3-r050 | 2 de 3 (r1, r2) |
+| s3-r075 | 2 de 3 (r1, r3) |
+
+p95 global e comandos em ms, no cliente (Gatling). Espera e uso da conexão do Hikari em ms, média da
+execução. Comando no banco: soma do tempo médio das instruções de escrita e do `SELECT … FOR UPDATE` no
+`pg_stat_statements`, em ms (o custo de um comando dentro do Postgres, sem a fila).
+
+| Cenário | Rep. | Estado | p95 global | % KO | Comandos p50 | p95 | p99 | Espera no pool | Uso da conexão | Comando no banco |
+|---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| s1 | r1 | estável | 35 | 0.0 | 10 | 35 | 123 | 0.4 | 10.4 | 3.5 |
+| s1 | r2 | estável | 44 | 0.0 | 9 | 44 | 297 | 1.7 | 13.4 | 5.9 |
+| s1 | r3 | estável | 53 | 0.0 | 11 | 53 | 288 | 0.6 | 14.9 | 6.7 |
+| s2 | r1 | **colapso** | 33,115 | 23.4 | — | — | — | 23,146.6 | 162.2 | — |
+| s2 | r2 | **colapso** | 21,749 | 0.5 | — | — | — | 3,776.4 | 119.6 | — |
+| s2 | r3 | estável | 2,688 | 0.0 | — | — | — | 525.6 | 62.8 | — |
+| s3-r025 | r1 | estável | 116 | 0.0 | 7 | 42 | 240 | 1.8 | 21.8 | 2.9 |
+| s3-r025 | r2 | estável | 615 | 0.0 | 8 | 483 | 1,259 | 51.6 | 40.2 | 4.2 |
+| s3-r025 | r3 | estável | 164 | 0.0 | 7 | 66 | 700 | 12.4 | 24.8 | 3.4 |
+| s3-r050 | r1 | **colapso** | 23,607 | 1.2 | 821 | 23,476 | 30,010 | 6,352.3 | 134.8 | 8.1 |
+| s3-r050 | r2 | **colapso** | 29,963 | 6.8 | 5,223 | 29,859 | 30,494 | 9,432.1 | 147.3 | 7.8 |
+| s3-r050 | r3 | estável | 417 | 0.0 | 8 | 254 | 819 | 33.2 | 37.1 | 4.3 |
+| s3-r075 | r1 | **colapso** | 44,481 | 20.7 | 935 | 44,268 | 48,547 | 12,126.1 | 136.8 | 7.0 |
+| s3-r075 | r2 | estável | 2,155 | 0.0 | 26 | 2,090 | 2,958 | 394.0 | 59.4 | 4.6 |
+| s3-r075 | r3 | **colapso** | 30,335 | 11.9 | 9 | 30,335 | 34,766 | 6,903.1 | 83.9 | 5.1 |
 
 ## Pool e banco por cenário
 

@@ -13,13 +13,14 @@ Metodologia no [ADR-0005](../adr/0005-metodologia-de-benchmark.md); revisão da 
 | Arquivo | O que é |
 |---|---|
 | `README.md` | Análise e resposta às hipóteses (escrita à mão) |
-| `summary.md` | Mediana e faixa das repetições por cenário e requisição; pool e banco por cenário |
+| `summary.md` | Estado de cada execução (estável ou colapso) e colapsos por cenário; mediana e faixa das repetições por requisição; pool e banco |
 | `env.md` | Commit, hardware, runtime, limites dos containers, flags da JVM, configuração do Postgres |
 | `explain.md` | `EXPLAIN (ANALYZE, BUFFERS)` de Q1–Q4 depois da carga |
 | `runs/<cenário>/r<n>/stats.csv` | Tabela do relatório do Gatling (percentis incluem requisições com KO) |
-| `runs/<cenário>/r<n>/pg_stat_statements.csv` | As 25 consultas que mais consumiram tempo no Postgres |
+| `runs/<cenário>/r<n>/pg_stat_statements.csv` | As instruções que mais consumiram tempo no Postgres (25 na v1, 50 a partir da #11) |
 | `runs/<cenário>/r<n>/prometheus.csv` | Pool do Hikari, CPU da aplicação e blocos lidos no Postgres |
 | `runs/<cenário>/r<n>/docker-stats.csv` | CPU, memória e I/O por container, amostrados durante a execução |
+| `runs/<cenário>/r<n>/timeseries.csv` | Série a cada 5 s, do Prometheus: vazão, erros e p95 (na aplicação) de comandos e consultas, fila e uso do pool, blocos lidos, CPU e heap |
 
 ## Como reproduzir
 

@@ -5,6 +5,9 @@
 //
 // O Gatling 3.16 não grava mais stats.json: as estatísticas só existem na tabela do index.html. Os percentis
 // incluem requisições OK e KO, e o resumo mostra o % de KO ao lado para não esconder falhas.
+//
+// Cada execução é classificada como estável ou colapso pelo p95 global (ADR-0009). O critério fica aqui, igual
+// para todas as fases, para a contagem "colapsou em k de n" não ser decidida depois de ver o resultado.
 
 static final List<String> COLUMNS = List.of("total", "ok", "ko", "pct_ko", "rps", "min", "p50", "p75", "p95",
         "p99", "max", "mean", "stddev");
@@ -12,6 +15,9 @@ static final Pattern ROW = Pattern.compile(
         "<tr id=\"([^\"]+)\"(?: data-parent=\"([^\"]+)\")?\\s*>(.*?)</tr>", Pattern.DOTALL);
 static final Pattern NAME = Pattern.compile("class=\"ellipsed-name\">([^<]*)</span>");
 static final Pattern VALUE = Pattern.compile("<td class=\"value \\w+ col-(\\d+)\">([^<]*)</td>");
+static final double COLLAPSE_P95_MS = 5_000;
+/** Instruções que um comando executa: escritas e o lock da conta. */
+static final Pattern WRITE = Pattern.compile("^\"?(INSERT|UPDATE|DELETE)\\b|FOR UPDATE", Pattern.CASE_INSENSITIVE);
 
 void main(String[] args) throws IOException {
     switch (args.length == 0 ? "" : args[0]) {
@@ -64,9 +70,9 @@ void summarize(Path results) throws IOException {
 
             Gerado por `java bench/Report.java summarize`. Mediana das repetições; entre colchetes, a faixa do p95
             (mín–máx). Latências em ms, vazão em requisições/s. Parâmetros de cada cenário em
-            `runs/<cenário>/scenario.properties`.
+            `runs/<cenário>/scenario.properties`; série temporal de cada execução (5 s) em
+            `runs/<cenário>/r<n>/timeseries.csv`.
             """);
-    var commandP95 = new LinkedHashMap<String, double[]>();
     var resources = new LinkedHashMap<String, Map<String, Double>>();
     try (var scenarios = Files.list(runs)) {
         for (var scenario : scenarios.filter(Files::isDirectory).sorted().toList()) {
@@ -74,7 +80,7 @@ void summarize(Path results) throws IOException {
             if (reps.isEmpty()) {
                 continue;
             }
-            resources.put(scenario.getFileName().toString(), loadMetrics(scenario));
+            resources.put(scenario.getFileName().toString(), loadMetrics(subdirectories(scenario)));
             out.append("\n## ").append(scenario.getFileName()).append(" (").append(reps.size())
                     .append(" execuções)\n\n").append(parameters(scenario))
                     .append("| Requisição | Vazão | % KO | p50 | p95 | p99 |\n|---|---:|---:|---:|---:|---:|\n");
@@ -90,18 +96,10 @@ void summarize(Path results) throws IOException {
                         .append(" | ").append(fmt(median(series, "p95"), 0))
                         .append(" [").append(fmt(p95[0], 0)).append("–").append(fmt(p95[p95.length - 1], 0))
                         .append("] | ").append(fmt(median(series, "p99"), 0)).append(" |\n");
-                if (name.equals("comandos")) {
-                    commandP95.put(scenario.getFileName().toString(),
-                            new double[] {median(series, "p50"), median(series, "p95"), median(series, "p99")});
-                }
             }
         }
     }
-    if (!commandP95.isEmpty()) {
-        out.append("\n## Comandos por cenário (H1)\n\n| Cenário | p50 | p95 | p99 |\n|---|---:|---:|---:|\n");
-        commandP95.forEach((scenario, p) -> out.append("| ").append(scenario).append(" | ").append(fmt(p[0], 0))
-                .append(" | ").append(fmt(p[1], 0)).append(" | ").append(fmt(p[2], 0)).append(" |\n"));
-    }
+    states(runs, out);
     out.append("""
 
             ## Pool e banco por cenário
@@ -125,15 +123,86 @@ void summarize(Path results) throws IOException {
     Files.writeString(results.resolve("summary.md"), out);
 }
 
-/** Mediana, entre as repetições, de cada métrica do prometheus.csv. */
-Map<String, Double> loadMetrics(Path scenario) throws IOException {
-    var series = new HashMap<String, List<Double>>();
-    try (var dirs = Files.list(scenario)) {
-        for (var csv : dirs.map(dir -> dir.resolve("prometheus.csv")).filter(Files::exists).toList()) {
-            for (var line : Files.readAllLines(csv).stream().skip(1).toList()) {
-                var cells = line.split(",");
-                series.computeIfAbsent(cells[0], _ -> new ArrayList<>()).add(Double.parseDouble(cells[1]));
+/**
+ * Estado de cada execução e quantas colapsaram por cenário. Com a carga perto da saturação, as repetições caem em
+ * estados diferentes e a mediana não descreve nenhum deles; a contagem e a tabela por execução, sim.
+ */
+void states(Path runs, StringBuilder out) throws IOException {
+    var counts = new StringBuilder();
+    var table = new StringBuilder();
+    for (var scenario : subdirectories(runs)) {
+        var reps = subdirectories(scenario).stream().filter(dir -> Files.exists(dir.resolve("stats.csv"))).toList();
+        var collapsed = new ArrayList<String>();
+        for (var rep : reps) {
+            var stats = loadStats(rep.resolve("stats.csv"));
+            var metrics = loadMetrics(List.of(rep));
+            var global = stats.get("Global");
+            var commands = stats.getOrDefault("comandos", new Stats(Map.of()));
+            boolean collapse = global.get("p95") > COLLAPSE_P95_MS;
+            if (collapse) {
+                collapsed.add(rep.getFileName().toString());
             }
+            table.append("| ").append(scenario.getFileName()).append(" | ").append(rep.getFileName())
+                    .append(" | ").append(collapse ? "**colapso**" : "estável")
+                    .append(" | ").append(fmt(global.get("p95"), 0))
+                    .append(" | ").append(fmt(global.get("pct_ko"), 1))
+                    .append(" | ").append(fmt(commands.get("p50"), 0))
+                    .append(" | ").append(fmt(commands.get("p95"), 0))
+                    .append(" | ").append(fmt(commands.get("p99"), 0))
+                    .append(" | ").append(fmt(metrics.getOrDefault("hikari_acquire_avg_s", Double.NaN) * 1000, 1))
+                    .append(" | ").append(fmt(metrics.getOrDefault("hikari_usage_avg_s", Double.NaN) * 1000, 1))
+                    .append(" | ").append(fmt(commandDbTime(rep.resolve("pg_stat_statements.csv")), 1))
+                    .append(" |\n");
+        }
+        counts.append("| ").append(scenario.getFileName()).append(" | ").append(collapsed.size()).append(" de ")
+                .append(reps.size()).append(collapsed.isEmpty() ? "" : " (" + String.join(", ", collapsed) + ")")
+                .append(" |\n");
+    }
+    out.append("""
+
+            ## Estado por execução
+
+            Colapso: p95 global acima de %s ms (ADR-0009). Leia a contagem, não a mediana: perto da saturação as
+            repetições caem em estados diferentes.
+
+            | Cenário | Colapsou |
+            |---|---|
+            """.formatted(fmt(COLLAPSE_P95_MS, 0))).append(counts).append("""
+
+            p95 global e comandos em ms, no cliente (Gatling). Espera e uso da conexão do Hikari em ms, média da
+            execução. Comando no banco: soma do tempo médio das instruções de escrita e do `SELECT … FOR UPDATE` no
+            `pg_stat_statements`, em ms (o custo de um comando dentro do Postgres, sem a fila).
+
+            | Cenário | Rep. | Estado | p95 global | % KO | Comandos p50 | p95 | p99 | Espera no pool | Uso da conexão | Comando no banco |
+            |---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+            """).append(table);
+}
+
+/** Soma do tempo médio das instruções que um comando executa; sem escritas (só leitura), não se aplica. */
+double commandDbTime(Path csv) throws IOException {
+    if (!Files.exists(csv)) {
+        return Double.NaN;
+    }
+    double total = 0;
+    boolean found = false;
+    for (var line : Files.readAllLines(csv).stream().skip(1).toList()) {
+        // calls,total_ms,mean_ms,stddev_ms,rows,shared_blks_hit,shared_blks_read,read_ms,query: só a consulta tem vírgulas.
+        var cells = line.split(",", 9);
+        if (WRITE.matcher(cells[8]).find()) {
+            total += Double.parseDouble(cells[2]);
+            found = true;
+        }
+    }
+    return found ? total : Double.NaN;
+}
+
+/** Mediana, entre as repetições, de cada métrica do prometheus.csv. */
+Map<String, Double> loadMetrics(List<Path> reps) throws IOException {
+    var series = new HashMap<String, List<Double>>();
+    for (var csv : reps.stream().map(dir -> dir.resolve("prometheus.csv")).filter(Files::exists).toList()) {
+        for (var line : Files.readAllLines(csv).stream().skip(1).toList()) {
+            var cells = line.split(",");
+            series.computeIfAbsent(cells[0], _ -> new ArrayList<>()).add(Double.parseDouble(cells[1]));
         }
     }
     var medians = new HashMap<String, Double>();
@@ -144,22 +213,30 @@ Map<String, Double> loadMetrics(Path scenario) throws IOException {
 
 List<Map<String, Stats>> loadReps(Path scenario) throws IOException {
     var reps = new ArrayList<Map<String, Stats>>();
-    try (var dirs = Files.list(scenario)) {
-        for (var csv : dirs.map(dir -> dir.resolve("stats.csv")).filter(Files::exists).sorted().toList()) {
-            var lines = Files.readAllLines(csv);
-            var rep = new LinkedHashMap<String, Stats>();
-            for (var line : lines.subList(1, lines.size())) {
-                var cells = line.split(",");
-                var values = new HashMap<String, Double>();
-                for (int i = 0; i < COLUMNS.size() && i + 1 < cells.length; i++) {
-                    values.put(COLUMNS.get(i), cells[i + 1].isBlank() ? Double.NaN : Double.parseDouble(cells[i + 1]));
-                }
-                rep.put(cells[0], new Stats(values));
-            }
-            reps.add(rep);
-        }
+    for (var csv : subdirectories(scenario).stream().map(dir -> dir.resolve("stats.csv")).filter(Files::exists).toList()) {
+        reps.add(loadStats(csv));
     }
     return reps;
+}
+
+Map<String, Stats> loadStats(Path csv) throws IOException {
+    var lines = Files.readAllLines(csv);
+    var rep = new LinkedHashMap<String, Stats>();
+    for (var line : lines.subList(1, lines.size())) {
+        var cells = line.split(",");
+        var values = new HashMap<String, Double>();
+        for (int i = 0; i < COLUMNS.size() && i + 1 < cells.length; i++) {
+            values.put(COLUMNS.get(i), cells[i + 1].isBlank() ? Double.NaN : Double.parseDouble(cells[i + 1]));
+        }
+        rep.put(cells[0], new Stats(values));
+    }
+    return rep;
+}
+
+List<Path> subdirectories(Path dir) throws IOException {
+    try (var entries = Files.list(dir)) {
+        return entries.filter(Files::isDirectory).sorted().toList();
+    }
 }
 
 String parameters(Path scenario) throws IOException {

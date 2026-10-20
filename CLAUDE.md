@@ -66,6 +66,7 @@ O JDK 25 vem do `.tool-versions` (asdf). Não setar `JAVA_HOME` para outro JDK.
   set é maior que o cache: o estado do cache muda o resultado, então nunca calibrar e medir na mesma sessão
   sem recarregar o seed.
 - Gatling 3.16 não gera `stats.json`; `bench/Report.java` extrai a tabela do `index.html`.
+- O Prometheus não tem volume: séries somem com o container. O `run.sh` exporta `timeseries.csv` na hora.
 - `docker-credential-desktop` pode travar (prompt do Keychain); imagens públicas baixam com
   `DOCKER_CONFIG` apontando para um `config.json` vazio.
 
