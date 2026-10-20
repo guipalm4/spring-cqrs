@@ -149,7 +149,7 @@ void states(Path runs, StringBuilder out) throws IOException {
                 collapsed.add(rep.getFileName().toString());
             }
             if (!Double.isNaN(commands.get("p95"))) {
-                labels.add(scenario.getFileName() + " " + rep.getFileName());
+                labels.add(readLoad(scenario) + ", " + rep.getFileName());
                 commandP95.add(commands.get("p95") / 1000);
             }
             table.append("| ").append(scenario.getFileName()).append(" | ").append(rep.getFileName())
@@ -217,10 +217,11 @@ String chart(Path csv, String column, String title, double divisor) throws IOExc
             """.formatted(title, last, join(values));
 }
 
+/** Barras na horizontal: com uma dúzia de execuções, os rótulos no eixo x se sobrepõem. */
 static String mermaid(String type, String title, List<String> labels, String unit, List<Double> values) {
     return """
             ```mermaid
-            xychart-beta
+            xychart-beta horizontal
                 title "%s"
                 x-axis [%s]
                 y-axis "%s"
@@ -302,6 +303,16 @@ String parameters(Path scenario) throws IOException {
     }
     return Files.readAllLines(file).stream().filter(line -> !line.isBlank() && !line.startsWith("#"))
             .map(line -> "`" + line + "`").collect(Collectors.joining(" · ", "", "\n\n"));
+}
+
+/** Rótulo da carga de leitura do cenário, a partir do scenario.properties. */
+String readLoad(Path scenario) throws IOException {
+    var properties = new Properties();
+    try (var reader = Files.newBufferedReader(scenario.resolve("scenario.properties"))) {
+        properties.load(reader);
+    }
+    var read = properties.getProperty("readRate", "?");
+    return read.equals("0") ? "só escrita" : read + " consultas/s";
 }
 
 /** Global e grupos primeiro; depois as requisições de cada grupo. */
