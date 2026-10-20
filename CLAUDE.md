@@ -68,6 +68,8 @@ O JDK 25 vem do `.tool-versions` (asdf). Não setar `JAVA_HOME` para outro JDK.
 - `make bench` exige o dataset de referência e leva ~1h20; feche outros containers da VM antes. O working
   set é maior que o cache: o estado do cache muda o resultado, então nunca calibrar e medir na mesma sessão
   sem recarregar o seed.
+- Métricas `*_max` do Micrometer (`hikaricp_connections_acquire_seconds_max`, `jvm_gc_pause_seconds_max`) decaem em
+  janelas e herdam o valor da execução anterior. Usar totais (`increase` de `_sum`), como o `gc_pause_total_s`.
 - Gatling 3.16 não gera `stats.json`; `bench/Report.java` extrai a tabela do `index.html`.
 - O Prometheus não tem volume: séries somem com o container. O `run.sh` exporta `timeseries.csv` na hora.
 - `docker-credential-desktop` pode travar (prompt do Keychain); imagens públicas baixam com
@@ -78,6 +80,7 @@ O JDK 25 vem do `.tool-versions` (asdf). Não setar `JAVA_HOME` para outro JDK.
 Projeções no mesmo Postgres (`statement_view`, `monthly_summary`, `tsvector` na projeção), atualizadas na
 mesma transação do comando, construídas a partir do ledger já carregado pelo seed (ADR-0008). Pronto
 quando os resultados v1×v2 estão em `docs/benchmarks/` e H2 e H4 respondidas.
-Antes: a issue #11 (controle "v1 com pools separados") — sem ela, o ganho da v2 não é atribuível.
-Lição do M2: a v1 colapsa por fila no pool do Hikari, não por contenção no Postgres; o Q4 é ~80% do tempo
-de leitura. Mesmas taxas do ADR-0009 em todas as fases; ler "colapsou em k de 3", não a mediana.
+Lições do M2 e da #11: a fila se forma no pool do Hikari, mas o colapso se sustenta pela JVM (heap cheio, GC
+parando tudo); pools separados não protegem a escrita (ADR-0010). O Q4 é ~80% do tempo de leitura. Mesmas taxas
+do ADR-0009 em todas as fases; ler "colapsou em k de 3", não a mediana. Comparar só com a v1 medida no mesmo
+dia (seed recarregado antes de cada uma): entre dois dias, a mesma v1 foi de 6 para 3 colapsos em 9.

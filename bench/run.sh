@@ -80,6 +80,7 @@ app=$("${COMPOSE[@]}" ps --format '{{.Service}}' | grep -E '^app-|-api$' | head 
     echo "## JVM ($app)"
     echo
     echo "- JVM_OPTS: \`$("${COMPOSE[@]}" exec -T "$app" sh -c 'echo "$JVM_OPTS"')\`"
+    echo "- Profiles do Spring: \`$("${COMPOSE[@]}" exec -T "$app" sh -c 'echo "${SPRING_PROFILES_ACTIVE:-default}"')\`"
     echo "- $("${COMPOSE[@]}" exec -T "$app" java -version 2>&1 | head -1)"
     echo
     echo "## Postgres"
@@ -100,6 +101,11 @@ gatling() { # writeRate readRate duration seed
 prometheus() { # expressão -> valor no instante atual
     curl -fsS --get "$PROMETHEUS/api/v1/query" --data-urlencode "query=$1" \
         | jq -r '.data.result[0].value[1] // "NaN"'
+}
+
+prometheus_by_pool() { # nome expressão-agrupada-por-pool -> uma linha "nome_<pool>,valor" por pool do Hikari
+    curl -fsS --get "$PROMETHEUS/api/v1/query" --data-urlencode "query=$2" \
+        | jq -r --arg name "$1" '.data.result[] | "\($name)_\(.metric.pool),\(.value[1])"'
 }
 
 run() { # nome writeRate readRate rep
@@ -145,15 +151,22 @@ run() { # nome writeRate readRate rep
     {
         echo "metric,value"
         echo "hikari_pending_max,$(prometheus "max(max_over_time(hikaricp_connections_pending[$window]))")"
-        echo "hikari_pending_avg,$(prometheus "avg(avg_over_time(hikaricp_connections_pending[$window]))")"
-        echo "hikari_active_avg,$(prometheus "avg(avg_over_time(hikaricp_connections_active[$window]))")"
+        # Fila e conexões ativas somam os pools (no controle da #11 são dois; ADR-0010); com um pool, é o mesmo valor.
+        echo "hikari_pending_avg,$(prometheus "sum(avg_over_time(hikaricp_connections_pending[$window]))")"
+        echo "hikari_active_avg,$(prometheus "sum(avg_over_time(hikaricp_connections_active[$window]))")"
         echo "hikari_acquire_max_s,$(prometheus "max(max_over_time(hikaricp_connections_acquire_seconds_max[$window]))")"
         # Espera pelo pool x tempo com a conexão: separa a fila no pool da lentidão dentro do banco.
         echo "hikari_acquire_avg_s,$(prometheus "sum(increase(hikaricp_connections_acquire_seconds_sum[$window])) / sum(increase(hikaricp_connections_acquire_seconds_count[$window]))")"
         echo "hikari_usage_avg_s,$(prometheus "sum(increase(hikaricp_connections_usage_seconds_sum[$window])) / sum(increase(hikaricp_connections_usage_seconds_count[$window]))")"
         echo "app_cpu_avg,$(prometheus "avg(avg_over_time(process_cpu_usage[$window]))")"
+        # Tempo total com a JVM parada em GC na execução; o contador atravessa lacunas de coleta (pausas longas).
+        echo "gc_pause_total_s,$(prometheus "sum(increase(jvm_gc_pause_seconds_sum[$window]))")"
         echo "pg_blks_hit,$(prometheus "sum(increase(pg_stat_database_blks_hit{datname=\"ledger\"}[$window]))")"
         echo "pg_blks_read,$(prometheus "sum(increase(pg_stat_database_blks_read{datname=\"ledger\"}[$window]))")"
+        # Por pool: no controle da #11, mostra se os comandos ainda esperam conexão quando as consultas fazem fila.
+        prometheus_by_pool hikari_acquire_avg_s "sum by (pool) (increase(hikaricp_connections_acquire_seconds_sum[$window])) / sum by (pool) (increase(hikaricp_connections_acquire_seconds_count[$window]))"
+        prometheus_by_pool hikari_usage_avg_s "sum by (pool) (increase(hikaricp_connections_usage_seconds_sum[$window])) / sum by (pool) (increase(hikaricp_connections_usage_seconds_count[$window]))"
+        prometheus_by_pool hikari_pending_max "max by (pool) (max_over_time(hikaricp_connections_pending[$window]))"
     } > "$dir/prometheus.csv"
 }
 
