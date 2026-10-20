@@ -33,9 +33,10 @@ smoke: ## Confere se a aplicação da fase está saudável
 	  curl -fsS localhost:8080/actuator/health && echo && exit 0; sleep 2; \
 	done; echo "aplicação não respondeu" >&2; exit 1
 
-seed: ## Carrega o dataset (APAGA os dados): make seed SCALE=1 — referência, ver ADR-0008
+seed: ## Carrega o dataset (APAGA os dados) e reconstrói as projeções da v2: make seed SCALE=1 (ADR-0008)
 	$(PSQL) -q -f - < bench/seed/seed.sql
 	$(PSQL) -c "CALL seed.load($(SCALE), $(SALT))" -c "VACUUM (ANALYZE) account" -c "VACUUM (ANALYZE) ledger_entry"
+	$(PSQL) -q -f - < bench/seed/rebuild.sql
 
 bench: ## Benchmark da fase no ar: make bench PHASE=v1 (~1 h; ADR-0005, ADR-0009)
 	PHASE=$(PHASE) bench/run.sh

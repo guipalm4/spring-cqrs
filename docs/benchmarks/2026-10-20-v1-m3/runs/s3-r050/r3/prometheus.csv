@@ -1,0 +1,14 @@
+metric,value
+hikari_pending_max,0
+hikari_pending_avg,0
+hikari_active_avg,1.1944444444444444
+hikari_acquire_max_s,0.078311459
+hikari_acquire_avg_s,0.000053452626261071196
+hikari_usage_avg_s,0.007451863832409109
+app_cpu_avg,0.04052777777777778
+gc_pause_total_s,0.4001142857142859
+pg_blks_hit,12021081.942857143
+pg_blks_read,452964.3428571428
+hikari_acquire_avg_s_HikariPool-1,0.000053452626261071196
+hikari_usage_avg_s_HikariPool-1,0.007451863832409109
+hikari_pending_max_HikariPool-1,0
