@@ -1,5 +1,6 @@
 package io.github.guipalm4.ledger.cqrs.command;
 
+import io.github.guipalm4.ledger.cqrs.Roles;
 import io.github.guipalm4.ledger.cqrs.command.CommandOutcome.Completed;
 import io.github.guipalm4.ledger.cqrs.command.CommandOutcome.Rejected;
 import io.github.guipalm4.ledger.cqrs.command.CommandResult.AccountOpened;
@@ -23,6 +24,7 @@ import java.util.List;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
 import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.json.JsonMapper;
@@ -35,6 +37,7 @@ import tools.jackson.databind.json.JsonMapper;
  * isso a transação pode seguir após uma {@link LedgerViolation} e gravar a recusa junto com a chave.
  */
 @Service
+@Profile(Roles.COMMANDS)
 public class CommandService {
 
     private static final String TRANSFER_CATEGORY = "TRANSFER";

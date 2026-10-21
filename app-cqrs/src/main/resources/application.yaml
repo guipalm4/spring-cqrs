@@ -1,6 +1,15 @@
 spring:
   application:
     name: app-cqrs
+  autoconfigure:
+    # O Mongo só existe na query-api e no projetor da v3 (application-query.yaml, application-projector.yaml), que
+    # esvaziam esta lista. Sem ela, a v2 e a command-api subiriam um cliente tentando conectar e um health DOWN.
+    exclude:
+      - org.springframework.boot.mongodb.autoconfigure.MongoAutoConfiguration
+      - org.springframework.boot.mongodb.autoconfigure.health.MongoHealthContributorAutoConfiguration
+      - org.springframework.boot.mongodb.autoconfigure.metrics.MongoMetricsAutoConfiguration
+      - org.springframework.boot.data.mongodb.autoconfigure.DataMongoAutoConfiguration
+      - org.springframework.boot.data.mongodb.autoconfigure.DataMongoRepositoriesAutoConfiguration
   datasource:
     url: ${DB_URL:jdbc:postgresql://localhost:5432/ledger}
     username: ${DB_USER:ledger}

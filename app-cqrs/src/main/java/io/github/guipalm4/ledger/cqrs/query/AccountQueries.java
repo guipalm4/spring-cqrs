@@ -1,5 +1,6 @@
 package io.github.guipalm4.ledger.cqrs.query;
 
+import io.github.guipalm4.ledger.cqrs.Roles;
 import io.github.guipalm4.ledger.cqrs.query.Views.AccountView;
 import io.github.guipalm4.ledger.cqrs.query.Views.CategoryView;
 import io.github.guipalm4.ledger.cqrs.query.Views.CounterpartyView;
@@ -23,6 +24,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
+import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Service;
 
@@ -36,6 +38,7 @@ import org.springframework.stereotype.Service;
  * Conta inexistente só é verificada quando o resultado vem vazio, para não pagar uma consulta extra no caso comum.
  */
 @Service
+@Profile(Roles.V2)
 public class AccountQueries {
 
     public static final int MAX_LIMIT = 200;

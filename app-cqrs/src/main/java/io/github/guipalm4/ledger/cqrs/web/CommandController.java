@@ -1,5 +1,6 @@
 package io.github.guipalm4.ledger.cqrs.web;
 
+import io.github.guipalm4.ledger.cqrs.Roles;
 import io.github.guipalm4.ledger.cqrs.command.CommandOutcome;
 import io.github.guipalm4.ledger.cqrs.command.CommandOutcome.Completed;
 import io.github.guipalm4.ledger.cqrs.command.CommandOutcome.Rejected;
@@ -19,6 +20,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.net.URI;
 import java.util.UUID;
+import org.springframework.context.annotation.Profile;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.http.ResponseEntity;
@@ -30,6 +32,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @Tag(name = "Comandos", description = "Todo comando exige Idempotency-Key; o reenvio devolve o resultado original")
+@Profile(Roles.COMMANDS)
 class CommandController {
 
     static final String IDEMPOTENCY_KEY = "Idempotency-Key";
