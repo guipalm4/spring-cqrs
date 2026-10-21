@@ -20,6 +20,10 @@ spring:
       uuid: standard
 
 management:
+  opentelemetry:
+    # Nome do serviço nos traces (profile trace): as três JVMs da v3 são o mesmo artefato.
+    resource-attributes:
+      service.name: projector
   health:
     db:
       enabled: false

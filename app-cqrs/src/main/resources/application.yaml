@@ -40,6 +40,10 @@ spring:
       enabled: true
 
 management:
+  tracing:
+    sampling:
+      # Nenhum span no benchmark; o profile trace (application-trace.yaml) liga 100% (ADR-0012).
+      probability: 0.0
   endpoints:
     web:
       exposure:

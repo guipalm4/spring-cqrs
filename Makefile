@@ -5,6 +5,13 @@ SALT ?= 42
 PSQL = $(COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U ledger -d ledger
 V3 := $(filter v3 v3-s5,$(PHASE))
 
+# make up PHASE=v3 TRACE=1: sobe o Tempo e soma o profile trace ao papel de cada JVM da v3 (ADR-0012). O make bench
+# se recusa a medir nesse modo.
+ifneq ($(TRACE),)
+COMPOSE += --profile trace
+export TRACE_PROFILE := ,trace
+endif
+
 # Controle do ADR-0012: o Postgres da v1-big tem os recursos e o cache dos dois stores da v3 somados.
 ifeq ($(PHASE),v1-big)
 export PG_CPUS := 4
@@ -22,7 +29,7 @@ help: ## Lista os alvos
 verify: ## Compila e roda todos os testes (Testcontainers)
 	./mvnw -B -ntp verify
 
-up: ## Sobe a fase: make up PHASE=v1|v1-split|v1-big|v2|v3|v3-s5 (controles: ADR-0010, ADR-0012)
+up: ## Sobe a fase: make up PHASE=v1|v1-split|v1-big|v2|v3|v3-s5 [TRACE=1] (ADR-0010, ADR-0012)
 	$(COMPOSE) up -d --build --wait
 
 down: ## Derruba a fase, mantendo o volume do Postgres

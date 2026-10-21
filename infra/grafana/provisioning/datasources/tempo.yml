@@ -1,0 +1,9 @@
+# Traces da v3 (make up PHASE=v3 TRACE=1; ADR-0012). Fora desse modo o Tempo não sobe e o datasource fica sem dados.
+apiVersion: 1
+
+datasources:
+  - name: Tempo
+    type: tempo
+    uid: tempo
+    access: proxy
+    url: http://tempo:3200

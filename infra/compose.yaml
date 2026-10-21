@@ -2,6 +2,7 @@
 # PHASE=v1-split sobe o controle da #11: a mesma v1 com pools separados para comandos e consultas (ADR-0010).
 # PHASE=v1-big sobe o controle do ADR-0012: a mesma v1 com o hardware da v3 (o make exporta os PG_* do Postgres).
 # PHASE=v3 sobe o CQRS físico; PHASE=v3-s5 acrescenta a segunda query-api do S5 (H7). ADR-0012.
+# TRACE=1 (make up PHASE=v3 TRACE=1) sobe o Tempo e liga o profile trace nas JVMs da v3; nunca durante o benchmark.
 # Profiles e limites de recursos: docs/adr/0007-ambiente-de-execucao.md
 
 name: spring-cqrs
@@ -167,7 +168,8 @@ services:
     environment:
       <<: *app-env
       LEDGER_PHASE: v3
-      SPRING_PROFILES_ACTIVE: command
+      SPRING_PROFILES_ACTIVE: command${TRACE_PROFILE:-}
+      OTLP_TRACES_ENDPOINT: http://tempo:4318/v1/traces
       KAFKA_BOOTSTRAP: kafka:9092
     ports: ["8080:8080"]
     healthcheck: *app-healthcheck
@@ -186,7 +188,8 @@ services:
     environment:
       <<: *app-env
       LEDGER_PHASE: v3
-      SPRING_PROFILES_ACTIVE: projector
+      SPRING_PROFILES_ACTIVE: projector${TRACE_PROFILE:-}
+      OTLP_TRACES_ENDPOINT: http://tempo:4318/v1/traces
       KAFKA_BOOTSTRAP: kafka:9092
       MONGO_URI: mongodb://mongo:27017/ledger?maxPoolSize=10
     healthcheck: *app-healthcheck
@@ -208,7 +211,8 @@ services:
     environment:
       <<: *app-env
       LEDGER_PHASE: v3
-      SPRING_PROFILES_ACTIVE: query
+      SPRING_PROFILES_ACTIVE: query${TRACE_PROFILE:-}
+      OTLP_TRACES_ENDPOINT: http://tempo:4318/v1/traces
       MONGO_URI: mongodb://mongo:27017/ledger?maxPoolSize=10
     ports: ["8081:8080"]
     healthcheck: *app-healthcheck
@@ -226,6 +230,17 @@ services:
     <<: *query-api
     profiles: [v3-s5]
     ports: ["8082:8080"]
+
+  # Trace ponta a ponta da v3 (ADR-0012): só com TRACE=1, fora do benchmark.
+  tempo:
+    image: grafana/tempo:2.10.9
+    profiles: [trace]
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo.yaml:ro
+    ports: ["3200:3200"]
+    cpus: 0.5
+    mem_limit: 512m
 
   # Métricas do Postgres para o Grafana (buffer hit ratio, conexões, locks); pg_stat_statements vem do make bench.
   postgres-exporter:

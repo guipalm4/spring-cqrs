@@ -45,6 +45,11 @@ for url in "$COMMANDS_URL" ${QUERIES_URLS//,/ }; do
     curl -fsS "$url/actuator/health" > /dev/null || { echo "$url fora do ar: make up PHASE=$PHASE" >&2; exit 1; }
 done
 has_mongo=$("${COMPOSE[@]}" ps --format '{{.Service}}' | grep -qx mongo && echo 1 || true)
+# Com o tracing ligado (make up TRACE=1), as JVMs da v3 pagam um custo que a v1 e a v2 não pagaram (ADR-0012).
+if docker compose -f infra/compose.yaml --profile trace ps --format '{{.Service}}' | grep -qx tempo; then
+    echo "o Tempo está no ar (TRACE=1): suba a fase sem TRACE para medir" >&2
+    exit 1
+fi
 seed_accounts=$(psql_ -c "SELECT count(*) FROM account WHERE holder_id LIKE 'seed-%'")
 [[ $seed_accounts -gt 0 ]] || { echo "dataset vazio: make seed SCALE=1" >&2; exit 1; }
 scale=$(awk -v n="$seed_accounts" 'BEGIN { printf "%g", n / 100000 }')

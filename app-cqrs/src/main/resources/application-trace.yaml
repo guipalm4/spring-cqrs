@@ -1,0 +1,23 @@
+# Trace ponta a ponta da v3 no Tempo (ADR-0012): make up PHASE=v3 TRACE=1 soma este profile ao papel de cada JVM.
+# HTTP → transação do comando → envio ao Kafka (no listener assíncrono do Modulith) → consumo no projetor → Mongo.
+# Fora dele a amostragem é 0 e o Kafka e o Mongo não são instrumentados: a v1 e a v2 não pagaram esse custo.
+management:
+  tracing:
+    sampling:
+      probability: 1.0
+  opentelemetry:
+    tracing:
+      export:
+        otlp:
+          endpoint: ${OTLP_TRACES_ENDPOINT:http://localhost:4318/v1/traces}
+
+spring:
+  kafka:
+    template:
+      observation-enabled: true
+    listener:
+      observation-enabled: true
+  task:
+    execution:
+      # O Modulith envia ao Kafka num listener assíncrono depois do commit: sem isso, o trace pararia na transação.
+      propagate-context: true
