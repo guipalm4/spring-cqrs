@@ -60,6 +60,8 @@ O JDK 25 vem do `.tool-versions` (asdf). Não setar `JAVA_HOME` para outro JDK.
 - O Dockerfile treina o AOT cache **sem banco** (`spring.context.exit=onRefresh`, Flyway desligado).
   Qualquer bean que conecte ao banco durante o refresh quebra o build da imagem. Ao adicionar Spring
   Data JDBC, fixar `spring.data.jdbc.dialect=postgresql` para ele não consultar o banco na partida.
+  O registro de eventos do Modulith também consulta o banco na partida (`DatabaseType`), sem propriedade para
+  evitar: `EventRegistryDatabaseType` fixa o bean em POSTGRES.
 - O AOT cache só vale com as mesmas flags da JVM do treino: flags vão em `JVM_OPTS` (build arg e env).
 - A imagem `eclipse-temurin:25-jre` não tem curl nem wget; o healthcheck do compose usa `/dev/tcp` do bash.
 - O health do Actuator só lista componentes com `management.endpoint.health.show-components: always`.

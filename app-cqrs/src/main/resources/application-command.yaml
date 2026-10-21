@@ -1,0 +1,10 @@
+# command-api da v3 (ADR-0012): comandos no Postgres; cada lançamento sai pelo outbox do Modulith para o Kafka.
+spring:
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+  modulith:
+    events:
+      externalization:
+        enabled: true
+      # Publicações que não saíram (queda entre o commit e o envio) voltam na partida. Seguro com uma instância só.
+      republish-outstanding-events-on-restart: true
