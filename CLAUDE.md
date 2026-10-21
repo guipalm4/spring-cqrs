@@ -22,9 +22,10 @@ medindo cada fase. O valor do projeto está na comparação honesta, não em "CQ
 
 ```bash
 make verify          # build + testes (Testcontainers; precisa de Docker)
-make up PHASE=v1     # sobe a fase e espera ficar saudável (v1 | v2)
-make smoke           # health da aplicação em :8080
+make up PHASE=v1     # sobe a fase e espera ficar saudável (v1 | v1-split | v1-big | v2 | v3 | v3-s5)
+make smoke           # health da aplicação em :8080 (na v3, também a query-api em :8081)
 make seed SCALE=1    # APAGA e carrega o dataset (1 = referência; 0.01 para testes manuais rápidos)
+                     # na v3, o projetor carrega o Mongo a partir do ledger (MongoSeed), sem o rebuild da v2
 make bench PHASE=v1  # benchmark da fase no ar (~1h20 com SCALE=1) -> docs/benchmarks/<data>-<fase>/
 make down            # make clean também apaga o volume do Postgres
 ```
@@ -79,6 +80,8 @@ O JDK 25 vem do `.tool-versions` (asdf). Não setar `JAVA_HOME` para outro JDK.
 - A latência de ler uma página fora do `shared_buffers` (`read_ms / shared_blks_read` no `pg_stat_statements`) variou de
   4 ms a 0,2 ms entre execuções da mesma v1 e decide se ela colapsa (6, 3 e 0 em 9). Informar junto de toda comparação.
 - O `pg_stat_statements.csv` guarda 400 caracteres por instrução: na v2, Q2 e Q4 têm o mesmo começo e aparecem somados.
+- Para testar uma fase sem apagar o dataset de outra, `COMPOSE_PROJECT_NAME=spring-cqrs-<x>` dá volumes próprios
+  (o `make` e o `run.sh` respeitam). Pare a outra fase antes (`make down`): as portas são as mesmas.
 - `docker-credential-desktop` pode travar (prompt do Keychain); imagens públicas baixam com
   `DOCKER_CONFIG` apontando para um `config.json` vazio.
 

@@ -105,6 +105,9 @@ void summarize(Path results) throws IOException {
     }
     states(runs, out);
     pools(runs, out);
+    jvms(runs, out);
+    projection(runs, out);
+    reads(runs, out);
     out.append("""
 
             ## Pool e banco por cenário
@@ -230,6 +233,140 @@ void pools(Path runs, StringBuilder out) throws IOException {
             | Cenário | Rep. | Pool | Espera | Uso da conexão | Fila máx. |
             |---|---|---|---:|---:|---:|
             """).append(table);
+}
+
+/**
+ * GC, CPU e heap de cada JVM por execução, quando há mais de uma (na v3: command-api, query-api e projetor). Mostra
+ * se a JVM dos comandos ainda para em GC quando a das consultas colapsa (H3, ADR-0010, ADR-0012).
+ */
+void jvms(Path runs, StringBuilder out) throws IOException {
+    var table = new StringBuilder();
+    boolean many = false;
+    for (var scenario : subdirectories(runs)) {
+        for (var rep : subdirectories(scenario)) {
+            var metrics = loadMetrics(List.of(rep));
+            var instances = metrics.keySet().stream().filter(key -> key.startsWith("gc_pause_total_s_"))
+                    .map(key -> key.substring("gc_pause_total_s_".length())).sorted().toList();
+            many |= instances.size() > 1;
+            for (var instance : instances) {
+                table.append("| ").append(scenario.getFileName()).append(" | ").append(rep.getFileName())
+                        .append(" | ").append(instance)
+                        .append(" | ").append(fmt(metrics.getOrDefault("gc_pause_total_s_" + instance, Double.NaN), 1))
+                        .append(" | ").append(percent(metrics.getOrDefault("app_cpu_avg_" + instance, Double.NaN), 0))
+                        .append(" | ").append(fmt(metrics.getOrDefault("heap_max_mib_" + instance, Double.NaN), 0))
+                        .append(" |\n");
+            }
+        }
+    }
+    if (!many) {
+        return;
+    }
+    out.append("""
+
+            ## JVMs por execução
+
+            GC: segundos com a JVM parada em GC na execução. CPU: média do processo. Heap: maior uso na execução, em MiB.
+
+            | Cenário | Rep. | JVM | GC (s) | CPU | Heap máx. |
+            |---|---|---|---:|---:|---:|
+            """).append(table);
+}
+
+/** Atraso da projeção, reentregas e fila do outbox por execução, quando há projetor (v3, H5, ADR-0012). */
+void projection(Path runs, StringBuilder out) throws IOException {
+    var table = new StringBuilder();
+    for (var scenario : subdirectories(runs)) {
+        for (var rep : subdirectories(scenario)) {
+            var metrics = loadMetrics(List.of(rep));
+            double applied = metrics.getOrDefault("projection_applied", Double.NaN);
+            if (Double.isNaN(applied) || applied == 0) {
+                continue;
+            }
+            table.append("| ").append(scenario.getFileName()).append(" | ").append(rep.getFileName())
+                    .append(" | ").append(fmt(applied, 0))
+                    .append(" | ").append(fmt(metrics.getOrDefault("projection_lag_p50_s", Double.NaN) * 1000, 0))
+                    .append(" | ").append(fmt(metrics.getOrDefault("projection_lag_p99_s", Double.NaN) * 1000, 0))
+                    .append(" | ").append(fmt(metrics.getOrDefault("projection_lag_max_s", Double.NaN) * 1000, 0))
+                    .append(" | ").append(fmt(metrics.getOrDefault("projection_duplicates", Double.NaN), 0))
+                    .append(" | ").append(fmt(metrics.getOrDefault("outbox_backlog_max", Double.NaN), 0))
+                    .append(" |\n");
+        }
+    }
+    if (table.isEmpty()) {
+        return;
+    }
+    out.append("""
+
+            ## Atraso da projeção por execução
+
+            Do `occurred_at` do lançamento (início da transação do comando) até ele estar nas duas projeções do Mongo,
+            em ms; superestima o atraso em até a duração do comando. p50 e p99 vêm do histograma (precisão dos
+            buckets); o máximo pode vir de uma janela anterior à execução. Reentregas: lançamentos que o projetor
+            recebeu de novo e descartou. Fila do outbox: publicações ainda não enviadas ao Kafka, no maior instante.
+
+            | Cenário | Rep. | Lançamentos | p50 | p99 | Máx. | Reentregas | Fila do outbox |
+            |---|---|---:|---:|---:|---:|---:|---:|
+            """).append(table);
+}
+
+/**
+ * Tempo por página lida do disco, por execução: no Postgres, {@code read_ms / shared_blks_read} somados no
+ * pg_stat_statements; no Mongo (v3), o tempo das threads da aplicação lendo páginas para o cache do WiredTiger. A
+ * velocidade do disco decide se a v1 colapsa (CLAUDE.md), então toda comparação a mostra ao lado.
+ */
+void reads(Path runs, StringBuilder out) throws IOException {
+    var table = new StringBuilder();
+    for (var scenario : subdirectories(runs)) {
+        for (var rep : subdirectories(scenario)) {
+            double[] postgres = postgresReads(rep.resolve("pg_stat_statements.csv"));
+            double[] mongo = mongoReads(rep.resolve("mongo-cache.csv"));
+            table.append("| ").append(scenario.getFileName()).append(" | ").append(rep.getFileName())
+                    .append(" | ").append(fmt(postgres[0], 0))
+                    .append(" | ").append(fmt(postgres[1] / postgres[0], 2))
+                    .append(" | ").append(fmt(mongo[0], 0))
+                    .append(" | ").append(fmt(mongo[1] / mongo[0], 2))
+                    .append(" |\n");
+        }
+    }
+    out.append("""
+
+            ## Leitura de disco por execução
+
+            Páginas lidas fora do cache e tempo médio por página, em ms. Postgres: soma das instruções do
+            pg_stat_statements (as 50 mais caras). Mongo: leituras das threads da aplicação para o cache do WiredTiger.
+            — quando o store não existe na fase.
+
+            | Cenário | Rep. | Postgres: páginas | ms/página | Mongo: páginas | ms/página |
+            |---|---|---:|---:|---:|---:|
+            """).append(table);
+}
+
+/** {páginas lidas, ms lendo} somados no pg_stat_statements.csv. */
+double[] postgresReads(Path csv) throws IOException {
+    if (!Files.exists(csv)) {
+        return new double[] {Double.NaN, Double.NaN};
+    }
+    double pages = 0;
+    double ms = 0;
+    for (var line : Files.readAllLines(csv).stream().skip(1).toList()) {
+        var cells = line.split(",", 9);
+        pages += Double.parseDouble(cells[6]);
+        ms += Double.parseDouble(cells[7]);
+    }
+    return new double[] {pages, ms};
+}
+
+/** {páginas lidas pelas threads da aplicação, ms lendo} entre o início e o fim da execução, do mongo-cache.csv. */
+double[] mongoReads(Path csv) throws IOException {
+    if (!Files.exists(csv)) {
+        return new double[] {Double.NaN, Double.NaN};
+    }
+    var lines = Files.readAllLines(csv);
+    var before = lines.get(1).split(",");
+    var after = lines.get(2).split(",");
+    double reads = Double.parseDouble(after[3]) - Double.parseDouble(before[3]);
+    double micros = Double.parseDouble(after[4]) - Double.parseDouble(before[4]);
+    return new double[] {reads, micros / 1000};
 }
 
 /** Uma coluna do timeseries.csv como gráfico de linha; recusa série com lacunas, que o Mermaid desenharia contínua. */

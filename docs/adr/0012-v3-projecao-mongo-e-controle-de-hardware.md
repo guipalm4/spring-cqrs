@@ -118,10 +118,16 @@ registrado numa execução à parte, com amostragem 1. Se o listener assíncrono
 
 ### Seed
 
-`make seed` na v3 carrega o mesmo dataset no Postgres, roda o `rebuild_projections()` da v2 (as tabelas e funções
-do `V2__projections.sql` existem no schema da v3, vazias em execução), exporta as projeções para o Mongo (`COPY`
-→ `mongoimport`, com os ids aplicados de cada documento) e esvazia as tabelas de projeção no Postgres. O Mongo parte
-exatamente da projeção da v2. Tópico e outbox começam vazios.
+`make seed` na v3 carrega o mesmo dataset no Postgres e, no lugar do `rebuild_projections()` da v2, roda o
+projetor uma vez como carga (`MongoSeed`): ele lê o ledger ordenado por conta e grava os documentos com as mesmas
+peças que usa para cada evento, sem servidor web e sem consumir o Kafka. Um teste confere que a carga em lote e a
+aplicação evento a evento dão os mesmos documentos, com os mesmos tipos do BSON (`MongoSeedTests`), e outro, que os
+documentos do projetor são os do `rebuild_projections()` (`ProjectorEquivalenceTests`). As tabelas de projeção do
+Postgres existem no schema da v3 (`V2__projections.sql`), mas ficam vazias: preenchê-las só ocuparia disco e cache.
+Tópico e outbox começam vazios.
+
+Uma exportação por `COPY` → `mongoimport` seria um terceiro formato do documento (SQL e Extended JSON), sem teste
+que o amarre aos outros dois.
 
 ### Controle: v1 com o hardware da v3 (exceção ao ADR-0011)
 
@@ -155,6 +161,7 @@ WiredTiger para o cache (`serverStatus`).
   consultas. Custo de escrita: p95 dos comandos no S1 da v3 contra o da v1 e o da v2. Previsão: abaixo da v2 (o
   comando grava uma linha no outbox e a apaga, em vez de reescrever o bloco `jsonb`).
 - **H7 (S5):** `s3-r075` com duas `query-api` (round-robin no Gatling, `baseUrls`) contra o mesmo cenário com uma.
+  Roda como fase `v3-s5` com `READ_RATES=75`; o S1 e o S2 da mesma execução saem junto, como referência.
   Confirmada se o p95 das consultas ou o "k de n" melhorar e o p95 dos comandos ficar dentro da faixa da v3 com uma
   réplica. Como o modelo é aberto e as taxas são fixas, a vazão só muda se uma réplica não aguentar 75/s. **Se a v3
   com uma réplica já for estável a 75/s, a H7 fica inconclusiva nestas taxas**, e as taxas não sobem depois (ADR-0009).

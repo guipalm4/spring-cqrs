@@ -12,6 +12,7 @@ import com.mongodb.ErrorCategory;
 import com.mongodb.MongoWriteException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.IndexOptions;
+import com.mongodb.client.model.InsertManyOptions;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.UpdateOptions;
 import io.github.guipalm4.ledger.cqrs.Roles;
@@ -20,6 +21,9 @@ import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Locale;
 import org.bson.Document;
 import org.bson.conversions.Bson;
@@ -50,6 +54,7 @@ public class MongoProjections {
     public static final String SUMMARIES = "monthly_summary";
 
     private static final UpdateOptions UPSERT = new UpdateOptions().upsert(true);
+    private static final InsertManyOptions UNORDERED = new InsertManyOptions().ordered(false);
 
     private final MongoCollection<Document> statements;
     private final MongoCollection<Document> summaries;
@@ -84,6 +89,45 @@ public class MongoProjections {
                 combine(inc("credits", Math.max(event.amount(), 0)), inc("debits", Math.max(-event.amount(), 0)),
                         inc("entries", 1), push("applied", event.entryId())));
         return fresh;
+    }
+
+    /** Esvazia as duas projeções, com os índices (carga inicial do {@code make seed}). */
+    public void drop() {
+        statements.drop();
+        summaries.drop();
+    }
+
+    /**
+     * Carga inicial: grava de uma vez os documentos de várias contas, com todos os lançamentos de cada uma, montados
+     * com as mesmas peças de {@link #apply} ({@link MongoSeed}). Cada lista tem de trazer contas inteiras.
+     */
+    public void insert(List<EntryPosted> entries) {
+        var blocks = new LinkedHashMap<List<Object>, List<EntryPosted>>();
+        var totals = new LinkedHashMap<List<Object>, List<EntryPosted>>();
+        for (var event : entries) {
+            var month = month(event.occurredAt());
+            blocks.computeIfAbsent(List.of(event.accountId(), month), _ -> new ArrayList<>()).add(event);
+            totals.computeIfAbsent(List.of(event.accountId(), month, (int) event.categoryId()), _ -> new ArrayList<>())
+                    .add(event);
+        }
+        var statementDocs = blocks.entrySet().stream().map(block -> new Document("account", block.getKey().get(0))
+                .append("month", block.getKey().get(1))
+                .append("entries", block.getValue().stream().map(MongoProjections::entry).toList())
+                .append("cps", block.getValue().stream()
+                        .map(e -> e.counterpartyName().toLowerCase(Locale.ROOT)).distinct().toList()))
+                .toList();
+        var summaryDocs = totals.entrySet().stream().map(total -> new Document("account", total.getKey().get(0))
+                .append("month", total.getKey().get(1))
+                .append("cat", total.getKey().get(2))
+                .append("credits", total.getValue().stream().mapToLong(e -> Math.max(e.amount(), 0)).sum())
+                .append("debits", total.getValue().stream().mapToLong(e -> Math.max(-e.amount(), 0)).sum())
+                .append("entries", total.getValue().size())
+                .append("applied", total.getValue().stream().map(EntryPosted::entryId).toList()))
+                .toList();
+        if (!statementDocs.isEmpty()) {
+            statements.insertMany(statementDocs, UNORDERED);
+            summaries.insertMany(summaryDocs, UNORDERED);
+        }
     }
 
     /** Mês (UTC) do lançamento como {@code yyyy-MM}: a chave dos blocos e do resumo, que ordena como texto. */

@@ -19,6 +19,7 @@ import io.gatling.javaapi.http.HttpProtocolBuilder;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import java.util.function.Function;
 
@@ -33,8 +34,13 @@ import java.util.function.Function;
  *   <li>S3 — mista: escrita constante e leitura variando entre execuções.</li>
  * </ul>
  * Os grupos {@code comandos} e {@code consultas} dão os percentis agregados de cada lado (H1: p95/p99 dos comandos
- * com e sem carga de leitura). Parâmetros por propriedade de sistema: {@code baseUrl}, {@code accounts}, {@code writeRate}, {@code readRate}
- * (requisições/s), {@code duration} (s), {@code businessShare} e {@code seed}.
+ * com e sem carga de leitura). Parâmetros por propriedade de sistema: {@code commandsUrl}, {@code queriesUrls},
+ * {@code accounts}, {@code writeRate}, {@code readRate} (requisições/s), {@code duration} (s), {@code businessShare} e
+ * {@code seed}.
+ * <p>
+ * Na v1 e na v2, as duas URLs são o mesmo app. Na v3, comandos vão para a {@code command-api} e consultas para a
+ * {@code query-api}, direto, sem proxy (ADR-0005, ADR-0012); com duas réplicas da {@code query-api} (S5),
+ * {@code queriesUrls} tem as duas, separadas por vírgula, e cada requisição vai para uma delas, em rodízio.
  */
 public class LedgerSimulation extends Simulation {
 
@@ -43,12 +49,12 @@ public class LedgerSimulation extends Simulation {
     private final Workload workload = Workload.load(Path.of(property("accounts", "target/accounts.csv")),
             Double.parseDouble(property("businessShare", "0.5")), Long.parseLong(property("seed", "42")));
 
-    private final HttpProtocolBuilder protocol = http
-            .baseUrl(property("baseUrl", "http://localhost:8080"))
-            .acceptHeader(JSON)
-            .contentTypeHeader(JSON)
-            // Um pool de conexões compartilhado, como um cliente real; sem isso cada usuário abriria a sua.
-            .shareConnections();
+    private final String commandsUrl = property("commandsUrl", "http://localhost:8080");
+
+    private final HttpProtocolBuilder commandsProtocol = protocol(List.of(commandsUrl));
+
+    private final HttpProtocolBuilder queriesProtocol = protocol(
+            List.of(property("queriesUrls", commandsUrl).split(",")));
 
     private final ChainBuilder commands = exec(feed(workload.commands()), group("comandos").on(doSwitch("#{op}").on(
             onCase("deposit").then(exec(http(named("deposit"))
@@ -102,16 +108,27 @@ public class LedgerSimulation extends Simulation {
         var populations = new ArrayList<PopulationBuilder>();
         if (writeRate > 0) {
             populations.add(scenario("comandos").exec(commands)
-                    .injectOpen(constantUsersPerSec(writeRate).during(duration)));
+                    .injectOpen(constantUsersPerSec(writeRate).during(duration))
+                    .protocols(commandsProtocol));
         }
         if (readRate > 0) {
             populations.add(scenario("consultas").exec(queries)
-                    .injectOpen(constantUsersPerSec(readRate).during(duration)));
+                    .injectOpen(constantUsersPerSec(readRate).during(duration))
+                    .protocols(queriesProtocol));
         }
         if (populations.isEmpty()) {
             throw new IllegalArgumentException("writeRate e readRate não podem ser ambos zero");
         }
-        setUp(populations).protocols(protocol);
+        setUp(populations);
+    }
+
+    private static HttpProtocolBuilder protocol(List<String> baseUrls) {
+        return http
+                .baseUrls(baseUrls)
+                .acceptHeader(JSON)
+                .contentTypeHeader(JSON)
+                // Um pool de conexões compartilhado, como um cliente real; sem isso cada usuário abriria a sua.
+                .shareConnections();
     }
 
     /** Nome no relatório: operação + segmento da conta, para separar os grupos (ADR-0008). */
