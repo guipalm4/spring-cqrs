@@ -68,7 +68,9 @@ estiver lá. A verificação e a escrita são uma única operação atômica no 
 - **`statement_view`**: um documento por conta e mês (`_id` = conta + mês), com os lançamentos no formato do
   extrato, como o bloco da v2. A atualização é um `updateOne` com filtro `{_id, "entries.id": {$ne: id}}`, `$push`
   do lançamento e `upsert`. Se o lançamento já estiver no bloco, o filtro não casa e o upsert colide na chave
-  (`E11000`), que o projetor trata como "já aplicado".
+  (`E11000`). Como o `E11000` também aparece se outra escrita criar o documento entre o filtro e a inserção, o
+  projetor tenta de novo uma vez: agora o documento existe, e o filtro só deixa de casar se o lançamento já estiver
+  nele. Só então é "já aplicado".
 - **`monthly_summary`**: um documento por conta, mês e categoria, com os totais e os ids já somados, na mesma
   regra (`$inc` só se o id não estiver em `applied`).
 - **Duas coleções, como as duas tabelas da v2**, e não os totais dentro do bloco: com os totais no bloco, o Q3
@@ -83,10 +85,16 @@ estiver lá. A verificação e a escrita são uma única operação atômica no 
 
 - **Q2 e Q4** percorrem os blocos da conta do mês mais recente para o mais antigo e param quando a página enche,
   como na v2. Cada lançamento é conferido de novo com a regra da v1.
-- **Q4 usa um text index do Mongo** (`accountId` como prefixo, `entries.dsc` e `entries.cp`, `default_language:
-  none`) só para descartar blocos (ADR-0003). O `$text` do Mongo é OU entre termos e ignora acentos; a v1 usa
-  `plainto_tsquery('simple')`, que é E entre termos. Os termos vão entre aspas (E entre termos), o índice devolve um
-  superconjunto, e a conferência por lançamento garante a mesma resposta.
+- **Q4 usa um text index do Mongo** (`account` como prefixo, `entries.dsc` e `entries.cp`, `default_language:
+  none`) só para descartar blocos (ADR-0003). O `$text` do Mongo é OU entre termos (com ou sem aspas) e ignora
+  acentos e maiúsculas; a v1 usa `plainto_tsquery('simple')`, que é E entre termos. O índice devolve um superconjunto
+  dos blocos, e a conferência por lançamento aplica o E da v1.
+- **A conferência do texto roda em Java**, e não no Postgres como na v2: palavras são sequências de letras e dígitos
+  em minúsculas, com acento. É o que o parser `simple` faz com o vocabulário do ledger, mas não com termos de
+  pontuação interna (hífen, ponto, e-mail, URL), que o Postgres também guarda inteiros. O dataset e os termos do
+  benchmark não têm nenhum, e o teste de equivalência confere a bateria de buscas contra a v1. Fica como limite.
+- **O filtro por trecho de contraparte** descarta blocos por `cps`, os nomes do bloco em minúsculas (o papel da coluna
+  `counterparties` da v2), em vez de `$regex` com `i`, cuja comparação de letras acentuadas não é garantida.
 - **Q3** lê os documentos de `monthly_summary` dos 12 meses.
 - Um teste compara as respostas da v3 com as da v2 sobre o mesmo ledger, depois do seed e depois de novos comandos,
   como o `ProjectionEquivalenceTests`: o contrato continua idêntico (ADR-0008).

@@ -3,6 +3,7 @@ package io.github.guipalm4.ledger.cqrs.projection;
 import static com.mongodb.client.model.Filters.and;
 import static com.mongodb.client.model.Filters.eq;
 import static com.mongodb.client.model.Filters.ne;
+import static com.mongodb.client.model.Updates.addToSet;
 import static com.mongodb.client.model.Updates.combine;
 import static com.mongodb.client.model.Updates.inc;
 import static com.mongodb.client.model.Updates.push;
@@ -19,6 +20,7 @@ import java.time.Instant;
 import java.time.YearMonth;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
+import java.util.Locale;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.springframework.context.annotation.Profile;
@@ -32,11 +34,13 @@ import org.springframework.stereotype.Component;
  * <p>
  * Cada escrita é idempotente e não depende da ordem de chegada: o documento guarda os ids que já recebeu, e o filtro
  * só casa se o id ainda não estiver lá. Um lançamento repetido cai no upsert e colide no índice único ({@code E11000}),
- * o que quer dizer "já aplicado". Não há disputa pelo mesmo documento: a conta é a chave da partição, e cada partição
- * é consumida por uma thread só.
+ * o que quer dizer "já aplicado". Duas escritas no mesmo documento ao mesmo tempo também são seguras ({@link
+ * #upsertOnce}), embora não devam acontecer: a conta é a chave da partição, e cada partição tem uma thread só.
  * <p>
  * Chaves curtas nos lançamentos, como no {@code statement_entry()} da v2, exceto o instante: {@code ts} é em
  * microssegundos desde a época, porque o {@code Date} do BSON só guarda milissegundos e o Postgres guarda micro.
+ * {@code cps} são os nomes de contraparte do bloco em minúsculas, para o filtro por trecho do Q4 descartar blocos,
+ * como a coluna {@code counterparties} da v2.
  */
 @Component
 @Profile(Roles.PROJECTOR)
@@ -72,7 +76,8 @@ public class MongoProjections {
         var month = month(event.occurredAt());
         boolean fresh = upsertOnce(statements,
                 and(eq("account", event.accountId()), eq("month", month), ne("entries.id", event.entryId())),
-                push("entries", entry(event)));
+                combine(push("entries", entry(event)),
+                        addToSet("cps", event.counterpartyName().toLowerCase(Locale.ROOT))));
         upsertOnce(summaries,
                 and(eq("account", event.accountId()), eq("month", month), eq("cat", (int) event.categoryId()),
                         ne("applied", event.entryId())),
@@ -103,15 +108,24 @@ public class MongoProjections {
                 .append("cpa", event.counterpartyAccountId());
     }
 
+    /**
+     * {@code E11000} quer dizer que o documento já existe: com o lançamento (duplicata) ou criado por outra escrita
+     * entre o filtro e a inserção. Uma segunda tentativa separa os dois casos: o documento agora existe, e o filtro só
+     * deixa de casar se o lançamento já estiver nele.
+     */
     private static boolean upsertOnce(MongoCollection<Document> collection, Bson filter, Bson update) {
-        try {
-            collection.updateOne(filter, update, UPSERT);
-            return true;
-        } catch (MongoWriteException e) {
-            if (e.getError().getCategory() == ErrorCategory.DUPLICATE_KEY) {
-                return false;
+        for (int attempt = 1; ; attempt++) {
+            try {
+                collection.updateOne(filter, update, UPSERT);
+                return true;
+            } catch (MongoWriteException e) {
+                if (e.getError().getCategory() != ErrorCategory.DUPLICATE_KEY) {
+                    throw e;
+                }
+                if (attempt == 2) {
+                    return false;
+                }
             }
-            throw e;
         }
     }
 }

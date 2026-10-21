@@ -28,7 +28,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @Tag(name = "Consultas", description = "Q1–Q4 (docs/SCOPE.md). Datas em ISO-8601 UTC; valores em centavos")
-@Profile(Roles.V2)
+@Profile(Roles.QUERIES)
 class QueryController {
 
     private final AccountQueries queries;
