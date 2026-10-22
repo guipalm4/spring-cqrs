@@ -186,6 +186,7 @@ run() { # nome writeRate readRate rep
     report=$(ls -td bench/target/gatling/ledgersimulation-* | head -1)
     echo "${report#bench/target/gatling/}" > "$dir/gatling-report.txt"
     java bench/Report.java extract "$report" "$dir/stats.csv"
+    java bench/Report.java seconds "$report" "$dir/seconds.csv"
 
     # 50 linhas: as instruções de um comando (summary.md, "comando no banco") não podem cair fora do corte quando
     # as leituras e as consultas do postgres-exporter dominam o tempo.

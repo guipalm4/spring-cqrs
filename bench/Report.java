@@ -1,6 +1,7 @@
 // Relatório do benchmark: compact source file (JEP 512), roda sem build com `java bench/Report.java`.
 //
 //   java bench/Report.java extract <relatório-gatling> <stats.csv>   tabela do index.html -> CSV
+//   java bench/Report.java seconds <relatório-gatling> <seconds.csv> percentis por segundo do index.html -> CSV
 //   java bench/Report.java summarize <docs/benchmarks/...>           runs/*/r*/stats.csv -> summary.md
 //   java bench/Report.java chart <timeseries.csv> <coluna> <título> [divisor]   série -> gráfico Mermaid (stdout)
 //
@@ -16,6 +17,9 @@ static final Pattern ROW = Pattern.compile(
         "<tr id=\"([^\"]+)\"(?: data-parent=\"([^\"]+)\")?\\s*>(.*?)</tr>", Pattern.DOTALL);
 static final Pattern NAME = Pattern.compile("class=\"ellipsed-name\">([^<]*)</span>");
 static final Pattern VALUE = Pattern.compile("<td class=\"value \\w+ col-(\\d+)\">([^<]*)</td>");
+/** Séries do gráfico "Response Time Percentiles over Time" do index.html, na ordem em que o Gatling as grava. */
+static final List<String> PERCENTILES = List.of("min", "25%", "50%", "75%", "80%", "85%", "90%", "95%", "99%", "max");
+static final Pattern POINT = Pattern.compile("\\[(\\d+), (\\d+)\\]");
 static final double COLLAPSE_P95_MS = 5_000;
 /** Instruções que um comando executa: escritas e o lock da conta. */
 static final Pattern WRITE = Pattern.compile("^\"?(INSERT|UPDATE|DELETE)\\b|FOR UPDATE", Pattern.CASE_INSENSITIVE);
@@ -23,11 +27,12 @@ static final Pattern WRITE = Pattern.compile("^\"?(INSERT|UPDATE|DELETE)\\b|FOR 
 void main(String[] args) throws IOException {
     switch (args.length == 0 ? "" : args[0]) {
         case "extract" -> extract(Path.of(args[1], "index.html"), Path.of(args[2]));
+        case "seconds" -> seconds(Path.of(args[1], "index.html"), Path.of(args[2]));
         case "summarize" -> summarize(Path.of(args[1]));
         case "chart" -> System.out.print(chart(Path.of(args[1]), args[2], args[3],
                 args.length > 4 ? Double.parseDouble(args[4]) : 1));
-        default -> throw new IllegalArgumentException(
-                "uso: extract <relatório> <csv> | summarize <resultados> | chart <timeseries.csv> <coluna> <título> [divisor]");
+        default -> throw new IllegalArgumentException("uso: extract <relatório> <csv> | seconds <relatório> <csv> | "
+                + "summarize <resultados> | chart <timeseries.csv> <coluna> <título> [divisor]");
     }
 }
 
@@ -57,6 +62,42 @@ void extract(Path html, Path csv) throws IOException {
         lines.add((id.equals("ROOT") ? "Global" : name) + "," + String.join(",", values));
     }
     Files.createDirectories(csv.toAbsolutePath().getParent());
+    Files.write(csv, lines);
+}
+
+/**
+ * Percentis de resposta de cada segundo da execução (requisições OK, todas juntas), com o instante em epoch para
+ * cruzar com o docker-stats.csv. Os relatórios HTML ficam fora do Git (bench/target); sem esta série, um pico de um
+ * segundo some na média de 5 s do timeseries.csv (ADR-0013).
+ */
+void seconds(Path html, Path csv) throws IOException {
+    var content = Files.readString(html);
+    var series = new ArrayList<List<long[]>>();
+    for (var name : PERCENTILES) {
+        var matcher = Pattern.compile("name: '" + Pattern.quote(name) + "',\\s*data: (\\[\\[.*?\\]\\])", Pattern.DOTALL)
+                .matcher(content);
+        if (!matcher.find()) {
+            throw new IllegalStateException("série '" + name + "' não encontrada em " + html);
+        }
+        var points = new ArrayList<long[]>();
+        var point = POINT.matcher(matcher.group(1));
+        while (point.find()) {
+            points.add(new long[] {Long.parseLong(point.group(1)), Long.parseLong(point.group(2))});
+        }
+        series.add(points);
+    }
+    var lines = new ArrayList<String>();
+    lines.add("epoch_s,t_s," + String.join(",", PERCENTILES.stream()
+            .map(name -> name.equals("min") || name.equals("max") ? name : "p" + name.replace("%", "")).toList()));
+    long start = series.getFirst().getFirst()[0];
+    for (int i = 0; i < series.getFirst().size(); i++) {
+        var line = new StringBuilder().append(series.getFirst().get(i)[0] / 1000).append(',')
+                .append((series.getFirst().get(i)[0] - start) / 1000);
+        for (var points : series) {
+            line.append(',').append(points.get(i)[1]);
+        }
+        lines.add(line.toString());
+    }
     Files.write(csv, lines);
 }
 
