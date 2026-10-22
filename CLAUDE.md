@@ -10,6 +10,9 @@ medindo cada fase. O valor do projeto está na comparação honesta, não em "CQ
   Mudança intencional: `./mvnw verify -Dcontract.update=true` e revisar o diff.
 - `docs/adr/` — decisões fechadas. **Não reabrir uma decisão sem escrever um ADR novo** que a substitua.
 - Issue do marco no GitHub (`gh issue view <n>`) — critérios de pronto. Marcos M0–M7 = issues #1–#8.
+- `docs/diario.md` — o caminho até as decisões (o que acreditávamos, o que os dados mostraram, o que mudou, erros
+  no meio). **Ao fim de toda sessão em que uma hipótese, um plano ou a leitura de um resultado mudou, uma entrada
+  datada de 5 a 10 linhas, com links para a evidência.** Não repete os ADRs.
 
 ## Restrições inegociáveis
 
@@ -84,13 +87,20 @@ O JDK 25 vem do `.tool-versions` (asdf). Não setar `JAVA_HOME` para outro JDK.
   (o `make` e o `run.sh` respeitam). Pare a outra fase antes (`make down`): as portas são as mesmas.
 - `docker-credential-desktop` pode travar (prompt do Keychain); imagens públicas baixam com
   `DOCKER_CONFIG` apontando para um `config.json` vazio.
+- Picos de um segundo somem na média de 5 s do `timeseries.csv`: use o `seconds.csv` (percentis por segundo do
+  Gatling). Os relatórios HTML em `bench/target` não são versionados.
+- O I/O do `docker stats` tem 3 algarismos significativos (10 MB de resolução na faixa de GB): serve para comparar
+  ordens de grandeza e saltos, não para bytes por comando no Postgres (passos de 100 MB).
+- O Grafana a 512 MB pode bater no limite e fazer GBs de I/O no disco compartilhado da VM (21/10). Confira a linha
+  dele no `docker-stats.csv` antes de atribuir uma cauda a uma fase.
 
 ## Marco atual: M4 — v3, CQRS físico (issue #5)
 
 `command-api` (Postgres) e `query-api` (MongoDB) em containers separados, sincronizados por outbox (Spring Modulith)
 → Kafka → projetor. O documento do Mongo é o bloco conta/mês da v2 (ADR-0011), então da v2 para a v3 mudam só o
 armazenamento e a consistência. Pronto quando os resultados v1×v2×v3 estão em `docs/benchmarks/`, H3, H5 e H7 respondidas
-e há trace ponta a ponta no Grafana. **Escopo congelado até o M6 (ADR-0011).**
+e há trace ponta a ponta no Grafana. O ADR-0013 encerrou o escopo congelado: o M4 fecha com o dia de 21/10 (H5
+respondida; H3 e H7 inconclusivas a taxa fixa) e o estudo de capacidade (C1, C2, v1-replica) vira um marco antes do M5.
 Lições até o M3: o colapso da v1 depende de leituras lentas (com o disco rápido, nem a v1 colapsa); a v2 lê 3–8 vezes
 menos páginas fora do cache e custa +40% por comando no banco (2,9 ms e 104 KB de WAL num bloco cheio). No colapso, o
 canal é a JVM compartilhada (heap e GC), não só o pool (ADR-0010): é isso que a v3 precisa mostrar que resolve. Medir
