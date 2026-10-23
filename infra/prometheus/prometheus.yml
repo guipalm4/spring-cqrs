@@ -6,7 +6,16 @@ scrape_configs:
   - job_name: ledger
     metrics_path: /actuator/prometheus
     static_configs:
-      - targets: [app-baseline:8080, app-baseline-split:8080, app-cqrs:8080]
+      - targets:
+          - app-baseline:8080
+          - app-baseline-split:8080
+          - app-baseline-big:8080
+          - app-cqrs:8080
+          # v3: o rótulo instance separa as JVMs (comandos, consultas, projetor).
+          - command-api:8080
+          - query-api:8080
+          - query-api-2:8080
+          - projector:8080
 
   - job_name: postgres
     static_configs:

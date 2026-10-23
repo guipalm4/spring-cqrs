@@ -29,11 +29,21 @@
     <properties>
         <java.version>25</java.version>
         <postgres.image>postgres:18.6</postgres.image>
+        <kafka.image>apache/kafka:4.2.2</kafka.image>
+        <mongo.image>mongo:8.0.34</mongo.image>
         <springdoc.version>3.1.1</springdoc.version>
+        <spring-modulith.version>2.1.1</spring-modulith.version>
     </properties>
 
     <dependencyManagement>
         <dependencies>
+            <dependency>
+                <groupId>org.springframework.modulith</groupId>
+                <artifactId>spring-modulith-bom</artifactId>
+                <version>${spring-modulith.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
             <dependency>
                 <groupId>io.github.guipalm4</groupId>
                 <artifactId>ledger-domain</artifactId>
@@ -56,6 +66,8 @@
                     <configuration>
                         <systemPropertyVariables>
                             <postgres.image>${postgres.image}</postgres.image>
+                            <kafka.image>${kafka.image}</kafka.image>
+                            <mongo.image>${mongo.image}</mongo.image>
                         </systemPropertyVariables>
                     </configuration>
                 </plugin>

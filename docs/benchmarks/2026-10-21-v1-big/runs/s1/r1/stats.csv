@@ -1,0 +1,9 @@
+name,total,ok,ko,pct_ko,rps,min,p50,p75,p95,p99,max,mean,stddev
+Global,3600,3600,0,0,20,2,8,10,14,20,83,8,4
+comandos,3600,3600,0,0,20,2,8,10,14,20,83,8,4
+comandos / deposit pessoa,564,564,0,0,3.13,2,8,10,14,23,41,8,4
+comandos / transfer pessoa,255,255,0,0,1.42,4,11,13,16,21,23,10,4
+comandos / transfer empresa,264,264,0,0,1.47,4,10,12,15,20,25,10,4
+comandos / withdraw pessoa,937,937,0,0,5.21,2,8,10,14,20,83,8,5
+comandos / withdraw empresa,1037,1037,0,0,5.76,2,7,9,14,21,55,8,4
+comandos / deposit empresa,543,543,0,0,3.02,2,7,10,14,18,27,8,4

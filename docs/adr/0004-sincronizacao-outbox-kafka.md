@@ -2,6 +2,7 @@
 
 - **Status:** Aceito
 - **Data:** 2026-10-18
+- **Substituído em parte por:** [ADR-0012](0012-v3-projecao-mongo-e-controle-de-hardware.md) (idempotência sem depender da ordem)
 
 ## Contexto
 

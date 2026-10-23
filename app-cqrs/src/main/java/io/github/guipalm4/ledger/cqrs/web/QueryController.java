@@ -1,5 +1,6 @@
 package io.github.guipalm4.ledger.cqrs.web;
 
+import io.github.guipalm4.ledger.cqrs.Roles;
 import io.github.guipalm4.ledger.cqrs.query.AccountQueries;
 import io.github.guipalm4.ledger.cqrs.query.SearchCriteria;
 import io.github.guipalm4.ledger.cqrs.query.Views.AccountView;
@@ -17,6 +18,7 @@ import java.time.YearMonth;
 import java.time.ZoneOffset;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
+import org.springframework.context.annotation.Profile;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -26,6 +28,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @RestController
 @Tag(name = "Consultas", description = "Q1–Q4 (docs/SCOPE.md). Datas em ISO-8601 UTC; valores em centavos")
+@Profile(Roles.QUERIES)
 class QueryController {
 
     private final AccountQueries queries;

@@ -1,6 +1,7 @@
 // Relatório do benchmark: compact source file (JEP 512), roda sem build com `java bench/Report.java`.
 //
 //   java bench/Report.java extract <relatório-gatling> <stats.csv>   tabela do index.html -> CSV
+//   java bench/Report.java seconds <relatório-gatling> <seconds.csv> percentis por segundo do index.html -> CSV
 //   java bench/Report.java summarize <docs/benchmarks/...>           runs/*/r*/stats.csv -> summary.md
 //   java bench/Report.java chart <timeseries.csv> <coluna> <título> [divisor]   série -> gráfico Mermaid (stdout)
 //
@@ -16,6 +17,9 @@ static final Pattern ROW = Pattern.compile(
         "<tr id=\"([^\"]+)\"(?: data-parent=\"([^\"]+)\")?\\s*>(.*?)</tr>", Pattern.DOTALL);
 static final Pattern NAME = Pattern.compile("class=\"ellipsed-name\">([^<]*)</span>");
 static final Pattern VALUE = Pattern.compile("<td class=\"value \\w+ col-(\\d+)\">([^<]*)</td>");
+/** Séries do gráfico "Response Time Percentiles over Time" do index.html, na ordem em que o Gatling as grava. */
+static final List<String> PERCENTILES = List.of("min", "25%", "50%", "75%", "80%", "85%", "90%", "95%", "99%", "max");
+static final Pattern POINT = Pattern.compile("\\[(\\d+), (\\d+)\\]");
 static final double COLLAPSE_P95_MS = 5_000;
 /** Instruções que um comando executa: escritas e o lock da conta. */
 static final Pattern WRITE = Pattern.compile("^\"?(INSERT|UPDATE|DELETE)\\b|FOR UPDATE", Pattern.CASE_INSENSITIVE);
@@ -23,11 +27,12 @@ static final Pattern WRITE = Pattern.compile("^\"?(INSERT|UPDATE|DELETE)\\b|FOR 
 void main(String[] args) throws IOException {
     switch (args.length == 0 ? "" : args[0]) {
         case "extract" -> extract(Path.of(args[1], "index.html"), Path.of(args[2]));
+        case "seconds" -> seconds(Path.of(args[1], "index.html"), Path.of(args[2]));
         case "summarize" -> summarize(Path.of(args[1]));
         case "chart" -> System.out.print(chart(Path.of(args[1]), args[2], args[3],
-                args.length > 4 ? Double.parseDouble(args[4]) : 1));
-        default -> throw new IllegalArgumentException(
-                "uso: extract <relatório> <csv> | summarize <resultados> | chart <timeseries.csv> <coluna> <título> [divisor]");
+                args.length > 4 ? Double.parseDouble(args[4]) : 1, args.length > 5 ? args[5] : null));
+        default -> throw new IllegalArgumentException("uso: extract <relatório> <csv> | seconds <relatório> <csv> | "
+                + "summarize <resultados> | chart <timeseries.csv|seconds.csv> <coluna> <título> [divisor] [y máximo]");
     }
 }
 
@@ -57,6 +62,42 @@ void extract(Path html, Path csv) throws IOException {
         lines.add((id.equals("ROOT") ? "Global" : name) + "," + String.join(",", values));
     }
     Files.createDirectories(csv.toAbsolutePath().getParent());
+    Files.write(csv, lines);
+}
+
+/**
+ * Percentis de resposta de cada segundo da execução (requisições OK, todas juntas), com o instante em epoch para
+ * cruzar com o docker-stats.csv. Os relatórios HTML ficam fora do Git (bench/target); sem esta série, um pico de um
+ * segundo some na média de 5 s do timeseries.csv (ADR-0013).
+ */
+void seconds(Path html, Path csv) throws IOException {
+    var content = Files.readString(html);
+    var series = new ArrayList<List<long[]>>();
+    for (var name : PERCENTILES) {
+        var matcher = Pattern.compile("name: '" + Pattern.quote(name) + "',\\s*data: (\\[\\[.*?\\]\\])", Pattern.DOTALL)
+                .matcher(content);
+        if (!matcher.find()) {
+            throw new IllegalStateException("série '" + name + "' não encontrada em " + html);
+        }
+        var points = new ArrayList<long[]>();
+        var point = POINT.matcher(matcher.group(1));
+        while (point.find()) {
+            points.add(new long[] {Long.parseLong(point.group(1)), Long.parseLong(point.group(2))});
+        }
+        series.add(points);
+    }
+    var lines = new ArrayList<String>();
+    lines.add("epoch_s,t_s," + String.join(",", PERCENTILES.stream()
+            .map(name -> name.equals("min") || name.equals("max") ? name : "p" + name.replace("%", "")).toList()));
+    long start = series.getFirst().getFirst()[0];
+    for (int i = 0; i < series.getFirst().size(); i++) {
+        var line = new StringBuilder().append(series.getFirst().get(i)[0] / 1000).append(',')
+                .append((series.getFirst().get(i)[0] - start) / 1000);
+        for (var points : series) {
+            line.append(',').append(points.get(i)[1]);
+        }
+        lines.add(line.toString());
+    }
     Files.write(csv, lines);
 }
 
@@ -105,6 +146,9 @@ void summarize(Path results) throws IOException {
     }
     states(runs, out);
     pools(runs, out);
+    jvms(runs, out);
+    projection(runs, out);
+    reads(runs, out);
     out.append("""
 
             ## Pool e banco por cenário
@@ -232,8 +276,143 @@ void pools(Path runs, StringBuilder out) throws IOException {
             """).append(table);
 }
 
+/**
+ * GC, CPU e heap de cada JVM por execução, quando há mais de uma (na v3: command-api, query-api e projetor). Mostra
+ * se a JVM dos comandos ainda para em GC quando a das consultas colapsa (H3, ADR-0010, ADR-0012).
+ */
+void jvms(Path runs, StringBuilder out) throws IOException {
+    var table = new StringBuilder();
+    boolean many = false;
+    for (var scenario : subdirectories(runs)) {
+        for (var rep : subdirectories(scenario)) {
+            var metrics = loadMetrics(List.of(rep));
+            var instances = metrics.keySet().stream().filter(key -> key.startsWith("gc_pause_total_s_"))
+                    .map(key -> key.substring("gc_pause_total_s_".length())).sorted().toList();
+            many |= instances.size() > 1;
+            for (var instance : instances) {
+                table.append("| ").append(scenario.getFileName()).append(" | ").append(rep.getFileName())
+                        .append(" | ").append(instance)
+                        .append(" | ").append(fmt(metrics.getOrDefault("gc_pause_total_s_" + instance, Double.NaN), 1))
+                        .append(" | ").append(percent(metrics.getOrDefault("app_cpu_avg_" + instance, Double.NaN), 0))
+                        .append(" | ").append(fmt(metrics.getOrDefault("heap_max_mib_" + instance, Double.NaN), 0))
+                        .append(" |\n");
+            }
+        }
+    }
+    if (!many) {
+        return;
+    }
+    out.append("""
+
+            ## JVMs por execução
+
+            GC: segundos com a JVM parada em GC na execução. CPU: média do processo. Heap: maior uso na execução, em MiB.
+
+            | Cenário | Rep. | JVM | GC (s) | CPU | Heap máx. |
+            |---|---|---|---:|---:|---:|
+            """).append(table);
+}
+
+/** Atraso da projeção, reentregas e fila do outbox por execução, quando há projetor (v3, H5, ADR-0012). */
+void projection(Path runs, StringBuilder out) throws IOException {
+    var table = new StringBuilder();
+    for (var scenario : subdirectories(runs)) {
+        for (var rep : subdirectories(scenario)) {
+            var metrics = loadMetrics(List.of(rep));
+            double applied = metrics.getOrDefault("projection_applied", Double.NaN);
+            if (Double.isNaN(applied) || applied == 0) {
+                continue;
+            }
+            table.append("| ").append(scenario.getFileName()).append(" | ").append(rep.getFileName())
+                    .append(" | ").append(fmt(applied, 0))
+                    .append(" | ").append(fmt(metrics.getOrDefault("projection_lag_p50_s", Double.NaN) * 1000, 0))
+                    .append(" | ").append(fmt(metrics.getOrDefault("projection_lag_p99_s", Double.NaN) * 1000, 0))
+                    .append(" | ").append(fmt(metrics.getOrDefault("projection_lag_max_s", Double.NaN) * 1000, 0))
+                    .append(" | ").append(fmt(metrics.getOrDefault("projection_duplicates", Double.NaN), 0))
+                    .append(" | ").append(fmt(metrics.getOrDefault("outbox_backlog_max", Double.NaN), 0))
+                    .append(" |\n");
+        }
+    }
+    if (table.isEmpty()) {
+        return;
+    }
+    out.append("""
+
+            ## Atraso da projeção por execução
+
+            Do `occurred_at` do lançamento (início da transação do comando) até ele estar nas duas projeções do Mongo,
+            em ms; superestima o atraso em até a duração do comando. p50 e p99 vêm do histograma (precisão dos
+            buckets); o máximo pode vir de uma janela anterior à execução. Reentregas: lançamentos que o projetor
+            recebeu de novo e descartou. Fila do outbox: publicações ainda não enviadas ao Kafka, no maior instante.
+
+            | Cenário | Rep. | Lançamentos | p50 | p99 | Máx. | Reentregas | Fila do outbox |
+            |---|---|---:|---:|---:|---:|---:|---:|
+            """).append(table);
+}
+
+/**
+ * Tempo por página lida do disco, por execução: no Postgres, {@code read_ms / shared_blks_read} somados no
+ * pg_stat_statements; no Mongo (v3), o tempo das threads da aplicação lendo páginas para o cache do WiredTiger. A
+ * velocidade do disco decide se a v1 colapsa (CLAUDE.md), então toda comparação a mostra ao lado.
+ */
+void reads(Path runs, StringBuilder out) throws IOException {
+    var table = new StringBuilder();
+    for (var scenario : subdirectories(runs)) {
+        for (var rep : subdirectories(scenario)) {
+            double[] postgres = postgresReads(rep.resolve("pg_stat_statements.csv"));
+            double[] mongo = mongoReads(rep.resolve("mongo-cache.csv"));
+            table.append("| ").append(scenario.getFileName()).append(" | ").append(rep.getFileName())
+                    .append(" | ").append(fmt(postgres[0], 0))
+                    .append(" | ").append(fmt(postgres[1] / postgres[0], 2))
+                    .append(" | ").append(fmt(mongo[0], 0))
+                    .append(" | ").append(fmt(mongo[1] / mongo[0], 2))
+                    .append(" |\n");
+        }
+    }
+    out.append("""
+
+            ## Leitura de disco por execução
+
+            Páginas lidas fora do cache e tempo médio por página, em ms. Postgres: soma das instruções do
+            pg_stat_statements (as 50 mais caras). Mongo: leituras das threads da aplicação para o cache do WiredTiger.
+            — quando o store não existe na fase.
+
+            | Cenário | Rep. | Postgres: páginas | ms/página | Mongo: páginas | ms/página |
+            |---|---|---:|---:|---:|---:|
+            """).append(table);
+}
+
+/** {páginas lidas, ms lendo} somados no pg_stat_statements.csv. */
+double[] postgresReads(Path csv) throws IOException {
+    if (!Files.exists(csv)) {
+        return new double[] {Double.NaN, Double.NaN};
+    }
+    double pages = 0;
+    double ms = 0;
+    for (var line : Files.readAllLines(csv).stream().skip(1).toList()) {
+        var cells = line.split(",", 9);
+        pages += Double.parseDouble(cells[6]);
+        ms += Double.parseDouble(cells[7]);
+    }
+    return new double[] {pages, ms};
+}
+
+/** {páginas lidas pelas threads da aplicação, ms lendo} entre o início e o fim da execução, do mongo-cache.csv. */
+double[] mongoReads(Path csv) throws IOException {
+    if (!Files.exists(csv)) {
+        return new double[] {Double.NaN, Double.NaN};
+    }
+    var lines = Files.readAllLines(csv);
+    var before = lines.get(1).split(",");
+    var after = lines.get(2).split(",");
+    double reads = Double.parseDouble(after[3]) - Double.parseDouble(before[3]);
+    double micros = Double.parseDouble(after[4]) - Double.parseDouble(before[4]);
+    return new double[] {reads, micros / 1000};
+}
+
 /** Uma coluna do timeseries.csv como gráfico de linha; recusa série com lacunas, que o Mermaid desenharia contínua. */
-String chart(Path csv, String column, String title, double divisor) throws IOException {
+/** Com o y máximo, gráficos de execuções diferentes ficam na mesma escala. */
+String chart(Path csv, String column, String title, double divisor, String yMax) throws IOException {
     var lines = Files.readAllLines(csv);
     int index = List.of(lines.getFirst().split(",")).indexOf(column);
     if (index < 0) {
@@ -247,15 +426,17 @@ String chart(Path csv, String column, String title, double divisor) throws IOExc
         }
         values.add(Double.parseDouble(cells[index]) / divisor);
     }
-    var last = lines.getLast().split(",")[0];
+    // O timeseries.csv começa por t; o seconds.csv, pelo epoch, com o tempo relativo em t_s.
+    var header = List.of(lines.getFirst().split(","));
+    var last = lines.getLast().split(",")[Math.max(header.indexOf("t_s"), 0)];
     return """
             ```mermaid
             xychart-beta
                 title "%s"
                 x-axis "segundos desde o início" 0 --> %s
-                line [%s]
+            %s    line [%s]
             ```
-            """.formatted(title, last, join(values));
+            """.formatted(title, last, yMax == null ? "" : "    y-axis 0 --> " + yMax + "\n", join(values));
 }
 
 /** Barras na horizontal: com uma dúzia de execuções, os rótulos no eixo x se sobrepõem. */

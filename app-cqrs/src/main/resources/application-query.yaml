@@ -1,0 +1,18 @@
+# query-api da v3 (ADR-0012): Q1 e o catálogo de categorias no Postgres, Q2–Q4 nas projeções do Mongo. Quem aplica
+# as migrações é a command-api.
+spring:
+  autoconfigure:
+    exclude: ""
+  flyway:
+    enabled: false
+  mongodb:
+    # Pool de 10, como o do Hikari (ADR-0012); o driver usa 100 por padrão.
+    uri: ${MONGO_URI:mongodb://localhost:27017/ledger?maxPoolSize=10}
+    representation:
+      uuid: standard
+
+management:
+  opentelemetry:
+    # Nome do serviço nos traces (profile trace): as três JVMs da v3 são o mesmo artefato.
+    resource-attributes:
+      service.name: query-api

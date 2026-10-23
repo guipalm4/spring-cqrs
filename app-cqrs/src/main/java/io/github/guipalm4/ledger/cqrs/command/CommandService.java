@@ -1,11 +1,12 @@
 package io.github.guipalm4.ledger.cqrs.command;
 
+import io.github.guipalm4.ledger.cqrs.Roles;
 import io.github.guipalm4.ledger.cqrs.command.CommandOutcome.Completed;
 import io.github.guipalm4.ledger.cqrs.command.CommandOutcome.Rejected;
 import io.github.guipalm4.ledger.cqrs.command.CommandResult.AccountOpened;
 import io.github.guipalm4.ledger.cqrs.command.CommandResult.Posting;
 import io.github.guipalm4.ledger.cqrs.command.CommandResult.TransactionPosted;
-import io.github.guipalm4.ledger.cqrs.projection.Projections;
+import io.github.guipalm4.ledger.cqrs.event.EntryPosted;
 import io.github.guipalm4.ledger.domain.Account;
 import io.github.guipalm4.ledger.domain.Deposit;
 import io.github.guipalm4.ledger.domain.EntryKind;
@@ -22,18 +23,21 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 import org.jspecify.annotations.Nullable;
+import org.springframework.context.ApplicationEventPublisher;
+import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * Executa comandos com idempotência, numa transação por comando. Cada lançamento atualiza as projeções de
- * leitura na mesma transação (v2, ADR-0011).
+ * Executa comandos com idempotência, numa transação por comando. Cada lançamento publica um {@link EntryPosted} na
+ * transação: na v2, as projeções o aplicam na mesma transação (ADR-0011); na v3, ele sai pelo outbox (ADR-0012).
  * <p>
  * Toda recusa de negócio acontece antes da primeira escrita do comando (locks e validações primeiro). Por
  * isso a transação pode seguir após uma {@link LedgerViolation} e gravar a recusa junto com a chave.
  */
 @Service
+@Profile(Roles.COMMANDS)
 public class CommandService {
 
     private static final String TRANSFER_CATEGORY = "TRANSFER";
@@ -42,16 +46,16 @@ public class CommandService {
     private final LedgerEntryRepository entries;
     private final CategoryRepository categories;
     private final IdempotencyRepository idempotency;
-    private final Projections projections;
+    private final ApplicationEventPublisher events;
     private final JsonMapper json;
 
     CommandService(AccountRepository accounts, LedgerEntryRepository entries, CategoryRepository categories,
-            IdempotencyRepository idempotency, Projections projections, JsonMapper json) {
+            IdempotencyRepository idempotency, ApplicationEventPublisher events, JsonMapper json) {
         this.accounts = accounts;
         this.entries = entries;
         this.categories = categories;
         this.idempotency = idempotency;
-        this.projections = projections;
+        this.events = events;
         this.json = json;
     }
 
@@ -141,9 +145,10 @@ public class CommandService {
             String description, String counterpartyName, @Nullable UUID counterpartyAccountId) {
         long amount = after.balance() - before.balance();
         accounts.updateBalance(after.id(), after.balance());
-        long entryId = entries.append(transactionId, after.id(), kind.name(), amount, after.balance(), categoryId,
+        var entry = entries.append(transactionId, after.id(), kind.name(), amount, after.balance(), categoryId,
                 description, counterpartyName, counterpartyAccountId);
-        projections.apply(entryId);
+        events.publishEvent(new EntryPosted(entry.id(), transactionId, after.id(), entry.occurredAt(), kind, amount,
+                after.balance(), categoryId, description, counterpartyName, counterpartyAccountId));
         return new Posting(after.id(), amount, after.balance());
     }
 

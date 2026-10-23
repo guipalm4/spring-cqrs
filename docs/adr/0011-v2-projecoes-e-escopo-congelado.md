@@ -2,6 +2,7 @@
 
 - **Status:** Aceito
 - **Data:** 2026-10-20
+- **Exceção ao escopo congelado:** [ADR-0012](0012-v3-projecao-mongo-e-controle-de-hardware.md) (controle v1-big, uma medição)
 
 ## Contexto
 

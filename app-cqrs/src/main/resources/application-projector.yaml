@@ -1,0 +1,34 @@
+# Projetor da v3 (ADR-0012): Kafka → Mongo. Não usa o Postgres: o DataSource existe, mas nunca abre conexão, e quem
+# aplica as migrações é a command-api.
+spring:
+  autoconfigure:
+    exclude: ""
+  flyway:
+    enabled: false
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP:localhost:9092}
+    consumer:
+      # Um consumer group novo lê o tópico desde o início: depois do seed, o tópico começa vazio.
+      auto-offset-reset: earliest
+      # O valor é o JSON em bytes que o Modulith publica; o conversor que ele registra (ByteArrayJacksonJsonMessageConverter)
+      # também serve ao listener, que o recebe já como EntryPosted.
+      value-deserializer: org.apache.kafka.common.serialization.ByteArrayDeserializer
+  mongodb:
+    # Pool de 10, como o do Hikari (ADR-0012); o driver usa 100 por padrão.
+    uri: ${MONGO_URI:mongodb://localhost:27017/ledger?maxPoolSize=10}
+    representation:
+      uuid: standard
+
+management:
+  opentelemetry:
+    # Nome do serviço nos traces (profile trace): as três JVMs da v3 são o mesmo artefato.
+    resource-attributes:
+      service.name: projector
+  health:
+    db:
+      enabled: false
+
+ledger:
+  projector:
+    # Threads de consumo, uma partição por vez cada; o tópico tem 6 partições e o container, 1 CPU.
+    concurrency: 3

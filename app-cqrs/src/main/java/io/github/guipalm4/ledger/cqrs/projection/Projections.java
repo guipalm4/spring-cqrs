@@ -1,5 +1,9 @@
 package io.github.guipalm4.ledger.cqrs.projection;
 
+import io.github.guipalm4.ledger.cqrs.Roles;
+import io.github.guipalm4.ledger.cqrs.event.EntryPosted;
+import org.springframework.context.annotation.Profile;
+import org.springframework.context.event.EventListener;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
@@ -11,8 +15,12 @@ import org.springframework.transaction.annotation.Transactional;
  * O lançamento é lido da {@code ledger_entry} pelo id, com as mesmas funções SQL que o
  * {@code rebuild_projections()} usa: atualizar um a um e reconstruir do zero dão a mesma projeção. Não há
  * disputa entre comandos pelo mesmo bloco: o comando já tem o lock da conta ({@code SELECT … FOR UPDATE}).
+ * <p>
+ * Recebe o {@link EntryPosted} por um listener síncrono, na thread e na transação do comando que o publicou. Na
+ * v3, o mesmo evento vai para o Kafka, e o projetor faz este papel no Mongo.
  */
 @Component
+@Profile(Roles.V2)
 public class Projections {
 
     private final JdbcClient jdbc;
@@ -21,8 +29,13 @@ public class Projections {
         this.jdbc = jdbc;
     }
 
+    @EventListener
     @Transactional(propagation = Propagation.MANDATORY)
-    public void apply(long entryId) {
+    public void on(EntryPosted event) {
+        apply(event.entryId());
+    }
+
+    private void apply(long entryId) {
         // O bloco do mês cresce no fim; palavras e contrapartes só servem para descartar blocos na busca, então
         // um nome que já aparece como trecho de outro não precisa ser acrescentado.
         jdbc.sql("""

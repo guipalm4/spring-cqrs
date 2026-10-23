@@ -3,10 +3,11 @@
 Ledger financeiro que começa com um modelo único (leitura e escrita no mesmo Postgres) e evolui para
 CQRS, medindo a cada fase o que melhora e o que custa.
 
-> **Status:** M3 — a v2 (CQRS lógico) deixou as consultas de 3 a 8 vezes menos dependentes do disco, a +40% de custo
-> por comando no banco; nesta rodada, nem a v1 colapsou ([resultados](docs/benchmarks/2026-10-20-v2/README.md)). Antes:
-> no M2, a leitura derruba a escrita na v1 ([resultados](docs/benchmarks/2026-10-19-v1/README.md)); na #11, separar os
-> pools não protege a escrita ([resultados](docs/benchmarks/2026-10-20-v1-split/README.md)).
+> **Status:** M4 — a v3 (CQRS físico) custa 3 vezes a memória e de 2 a 5 vezes a CPU da v1, com atraso de projeção de
+> ~15 ms e uma cauda nos comandos; nenhuma fase colapsou, e a interferência que ela deveria eliminar não apareceu
+> ([resultados](docs/benchmarks/2026-10-21-v3/README.md)). Próximo: estudo de capacidade contra uma réplica de leitura
+> ([ADR-0013](docs/adr/0013-estudo-de-capacidade.md)). Antes: no M2, a leitura derruba a escrita na v1; na #11, separar
+> os pools não protege a escrita; no M3, a v2 deixou as consultas de 3 a 8 vezes menos dependentes do disco.
 > Escopo, hipóteses e marcos em [docs/SCOPE.md](docs/SCOPE.md); contrato e dataset no
 > [ADR-0008](docs/adr/0008-contrato-v1-e-dataset.md).
 
@@ -242,14 +243,92 @@ Dados: [análise completa](docs/benchmarks/2026-10-20-v2/README.md) ·
 
 **Pergunta.** Com escrita e leitura em stores e processos separados, sincronizados por outbox e Kafka, a
 interferência desaparece? Qual o preço em atraso de projeção, recursos e operação? Escalar só a leitura
-funciona? (H3, H5, H7) *A medir.*
+funciona? (H3, H5, H7)
 
-### 5. Um modelo de escrita, vários de leitura: OpenSearch (M5)
+**Antes de medir, um controle e a regra.** A v3 tem `command-api` (Postgres), outbox do Modulith, Kafka, projetor
+idempotente e `query-api` (Q1 no Postgres, Q2–Q4 no Mongo, com o mesmo documento conta/mês da v2). Ela tem também o
+dobro de JVMs e de cache. Se a escrita da v3 não degradasse, a primeira objeção seria "foi o hardware". Por isso entrou
+a v1-big, a v1 sem nenhuma mudança com os recursos da v3 somados, e o que contaria como resposta foi escrito antes
+([ADR-0012](docs/adr/0012-v3-projecao-mongo-e-controle-de-hardware.md)). Um trace segue o comando do HTTP até as duas
+escritas no Mongo ([registro](docs/trace/README.md)).
+
+**Evidência.** As cinco fases no mesmo dia, cada uma com o dataset recarregado, nas taxas de sempre. Nenhuma
+colapsou: 0 de 9 na v1, na v1-big, na v2 e na v3. A v1 usou ~5% do pool, e o Postgres dela, 36% de um núcleo de 200%.
+
+| p95 dos comandos (ms) | Só escrita | 75 consultas/s |
+|---|---:|---:|
+| v1 | 15 | 9 |
+| v1-big | 14 | 9 |
+| v2 | 15 | 8 |
+| v3 | 14 | 17 |
+
+**H3 e H7 ficaram inconclusivas.** Sem degradação na v1, não houve interferência para a v3 eliminar, e uma `query-api`
+já aguentava 75 consultas/s com 10% de CPU; com duas, o p95 das consultas foi de 26 para 22 ms.
+
+**H5 confirmada.** O atraso da projeção ficou em p50 de ~15 ms e p99 de 110–210 ms, sem reentrega. A v3 roda 6
+containers contra 2, usa 3,1 GiB de memória contra 0,9 GiB e de 2 a 5 vezes a CPU da v1; o Kafka sozinho, com 20
+escritas/s, gasta mais CPU que o Postgres inteiro da v1 sem leitura. No Postgres, o comando ficou mais barato (0,6–0,8
+ms contra 1,3–1,7 ms): ele grava o lançamento e o outbox, e nada mais. No cliente, porém, apareceu uma cauda:
+
+<!-- java bench/Report.java chart docs/benchmarks/2026-10-21-v1/runs/s1/r2/seconds.csv max "..." 1 900 -->
+```mermaid
+xychart-beta
+    title "v1: resposta máxima dos comandos a cada segundo, em ms (só escrita, r2)"
+    x-axis "segundos desde o início" 0 --> 179
+    y-axis 0 --> 900
+    line [45.00, 45.00, 19.00, 22.00, 21.00, 29.00, 17.00, 16.00, 18.00, 16.00, 16.00, 21.00, 19.00, 15.00, 20.00, 17.00, 19.00, 20.00, 23.00, 19.00, 22.00, 20.00, 16.00, 14.00, 19.00, 14.00, 23.00, 16.00, 44.00, 15.00, 15.00, 32.00, 27.00, 13.00, 24.00, 12.00, 16.00, 17.00, 22.00, 23.00, 14.00, 14.00, 22.00, 15.00, 24.00, 17.00, 23.00, 14.00, 15.00, 12.00, 15.00, 14.00, 13.00, 18.00, 16.00, 19.00, 18.00, 17.00, 14.00, 12.00, 25.00, 20.00, 17.00, 14.00, 14.00, 16.00, 14.00, 12.00, 25.00, 13.00, 16.00, 22.00, 14.00, 15.00, 13.00, 16.00, 15.00, 14.00, 11.00, 15.00, 17.00, 16.00, 13.00, 11.00, 12.00, 15.00, 14.00, 20.00, 22.00, 16.00, 15.00, 19.00, 15.00, 13.00, 11.00, 14.00, 18.00, 12.00, 14.00, 12.00, 25.00, 18.00, 15.00, 18.00, 15.00, 16.00, 22.00, 11.00, 23.00, 18.00, 22.00, 13.00, 16.00, 19.00, 15.00, 13.00, 27.00, 14.00, 13.00, 15.00, 17.00, 15.00, 10.00, 13.00, 16.00, 15.00, 12.00, 11.00, 14.00, 11.00, 20.00, 13.00, 14.00, 12.00, 16.00, 22.00, 12.00, 23.00, 22.00, 13.00, 14.00, 22.00, 22.00, 24.00, 15.00, 18.00, 50.00, 13.00, 18.00, 12.00, 23.00, 19.00, 18.00, 31.00, 19.00, 11.00, 24.00, 13.00, 13.00, 15.00, 27.00, 15.00, 21.00, 13.00, 17.00, 18.00, 14.00, 23.00, 18.00, 19.00, 11.00, 21.00, 12.00, 24.00, 14.00, 16.00, 18.00, 13.00, 20.00, 24.00]
+```
+
+<!-- java bench/Report.java chart docs/benchmarks/2026-10-21-v3/runs/s1/r2/seconds.csv max "..." 1 900 -->
+```mermaid
+xychart-beta
+    title "v3: resposta máxima dos comandos a cada segundo, em ms (só escrita, r2)"
+    x-axis "segundos desde o início" 0 --> 179
+    y-axis 0 --> 900
+    line [41.00, 18.00, 13.00, 27.00, 14.00, 15.00, 18.00, 10.00, 11.00, 14.00, 10.00, 12.00, 10.00, 13.00, 14.00, 11.00, 26.00, 14.00, 11.00, 11.00, 12.00, 11.00, 8.00, 18.00, 7.00, 13.00, 18.00, 18.00, 10.00, 11.00, 10.00, 8.00, 487.00, 390.00, 18.00, 25.00, 40.00, 36.00, 6.00, 8.00, 16.00, 14.00, 21.00, 20.00, 14.00, 86.00, 66.00, 9.00, 228.00, 9.00, 21.00, 12.00, 9.00, 12.00, 7.00, 9.00, 65.00, 15.00, 18.00, 17.00, 17.00, 15.00, 18.00, 14.00, 9.00, 8.00, 32.00, 12.00, 5.00, 11.00, 20.00, 31.00, 23.00, 19.00, 10.00, 12.00, 23.00, 11.00, 10.00, 366.00, 20.00, 17.00, 23.00, 19.00, 12.00, 12.00, 36.00, 30.00, 23.00, 17.00, 17.00, 10.00, 17.00, 135.00, 8.00, 11.00, 11.00, 12.00, 8.00, 8.00, 15.00, 17.00, 10.00, 11.00, 7.00, 19.00, 32.00, 10.00, 9.00, 13.00, 263.00, 33.00, 6.00, 16.00, 13.00, 10.00, 23.00, 15.00, 8.00, 6.00, 16.00, 12.00, 9.00, 13.00, 11.00, 13.00, 53.00, 21.00, 18.00, 7.00, 12.00, 48.00, 9.00, 23.00, 7.00, 11.00, 12.00, 10.00, 9.00, 13.00, 9.00, 157.00, 9.00, 8.00, 9.00, 9.00, 17.00, 8.00, 7.00, 8.00, 16.00, 9.00, 8.00, 29.00, 470.00, 8.00, 67.00, 18.00, 12.00, 15.00, 14.00, 13.00, 22.00, 16.00, 9.00, 8.00, 27.00, 10.00, 13.00, 7.00, 5.00, 15.00, 87.00, 10.00, 17.00, 16.00, 34.00, 7.00, 12.00, 20.00]
+```
+
+O p99 dos comandos da v3 sem nenhuma leitura é de ~110 ms, contra ~22 ms nas outras fases: de 9 a 15 segundos por
+execução com picos de até 822 ms. Não é GC nem uma instrução lenta. 84% dos picos caem a até 3 s de uma rajada de
+escrita do Mongo (43% ao acaso), que grava ~57 KB por comando no mesmo disco virtual do Postgres. A explicação provável
+é o fsync do commit esperando o disco, mas isso é correlação, não medição.
+
+Nas leituras, a v3 fica entre a v1 e a v2: Q3 empresarial com p95 de 12 ms, contra 18 na v1 e 4 na v2, com o mesmo
+documento. Q1 piorou 3–4 ms.
+
+**O que mudou no entendimento.** A pergunta "o CQRS ganha neste ponto de carga?" não tem resposta estável: a mesma
+taxa que derrubou a v1 no dia 19 usou 5% dela no dia 21. Longe da saturação, a v1 basta, a v2 deixa a leitura mais
+barata a custo baixo, e a v3 mostra só os custos fixos: mais memória, mais CPU, mais peças e uma cauda na escrita que
+o modelo único não tem. A separação física ainda não foi posta no regime em que deveria se pagar.
+
+**Decisão.** Fechar o M4 com o que foi medido e não subir as taxas até a v1 cair, o que seria escolher a carga pelo
+resultado. O [ADR-0013](docs/adr/0013-estudo-de-capacidade.md) muda a pergunta para "em que regime o CQRS se paga, e
+contra qual alternativa": escadas de carga até a saturação, com o maior degrau sustentado como resultado; dois
+cenários com mecanismo próprio (pico de leitura e escrita intensa com busca); e uma réplica de leitura da v1 como
+rival, porque é o que um time tentaria antes do CQRS. As previsões estão escritas no ADR.
+
+**Limites.** Taxas longe da saturação; gerador, fases e stores no mesmo host e no mesmo disco virtual; a soma dos
+limites de CPU da v3 passa da VM; a causa da cauda é inferida; o Grafana fez GBs de I/O em duas execuções; três
+repetições por cenário.
+
+Dados: [análise completa](docs/benchmarks/2026-10-21-v3/README.md) ·
+[v3](docs/benchmarks/2026-10-21-v3/summary.md) · [v1](docs/benchmarks/2026-10-21-v1/summary.md) ·
+[v1-big](docs/benchmarks/2026-10-21-v1-big/summary.md) · [v2](docs/benchmarks/2026-10-21-v2/summary.md) ·
+[v3 com duas `query-api`](docs/benchmarks/2026-10-21-v3-s5/summary.md) · [trace](docs/trace/README.md) ·
+tag [`m4`](https://github.com/guipalm4/spring-cqrs/tree/m4)
+
+### 5. Em que regime o CQRS se paga: capacidade (M4.5, [#17](https://github.com/guipalm4/spring-cqrs/issues/17))
+
+**Pergunta.** Levando cada fase até a saturação, a v3 sustenta mais carga que a v1 e que uma réplica de leitura da v1,
+num pico de leitura (C1) e numa escrita intensa com busca (C2)? (H8, H9, e a H3 e a H7 relidas)
+Previsões no [ADR-0013](docs/adr/0013-estudo-de-capacidade.md). *A medir.*
+
+### 6. Um modelo de escrita, vários de leitura: OpenSearch (M5)
 
 **Pergunta.** Uma projeção dedicada à busca supera Postgres e Mongo no Q4, a consulta que dominou o
 problema da v1? (H6) *A medir.*
 
-### 6. Balanço: quando não usar CQRS (M6)
+### 7. Balanço: quando não usar CQRS (M6)
 
 **Pergunta.** Somando ganhos e custos medidos, em que condições cada fase compensa, e em quais a v1 com
 ajustes bastava? *A escrever.*

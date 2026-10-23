@@ -5,11 +5,14 @@ medindo cada fase. O valor do projeto está na comparação honesta, não em "CQ
 
 ## Fontes de verdade (ler antes de decidir algo)
 
-- `docs/SCOPE.md` — fases, domínio, consultas Q1–Q4, hipóteses H1–H7, marcos M0–M7.
+- `docs/SCOPE.md` — fases, domínio, consultas Q1–Q4, hipóteses H1–H9, marcos M0–M7 e M4.5.
 - `docs/api/openapi.json` — contrato REST congelado; `ApiContractTests` compara com `/v3/api-docs`.
   Mudança intencional: `./mvnw verify -Dcontract.update=true` e revisar o diff.
 - `docs/adr/` — decisões fechadas. **Não reabrir uma decisão sem escrever um ADR novo** que a substitua.
-- Issue do marco no GitHub (`gh issue view <n>`) — critérios de pronto. Marcos M0–M7 = issues #1–#8.
+- Issue do marco no GitHub (`gh issue view <n>`) — critérios de pronto. Marcos M0–M7 = issues #1–#8; M4.5 = #17.
+- `docs/diario.md` — o caminho até as decisões (o que acreditávamos, o que os dados mostraram, o que mudou, erros
+  no meio). **Ao fim de toda sessão em que uma hipótese, um plano ou a leitura de um resultado mudou, uma entrada
+  datada de 5 a 10 linhas, com links para a evidência.** Não repete os ADRs.
 
 ## Restrições inegociáveis
 
@@ -22,9 +25,10 @@ medindo cada fase. O valor do projeto está na comparação honesta, não em "CQ
 
 ```bash
 make verify          # build + testes (Testcontainers; precisa de Docker)
-make up PHASE=v1     # sobe a fase e espera ficar saudável (v1 | v2)
-make smoke           # health da aplicação em :8080
+make up PHASE=v1     # sobe a fase e espera ficar saudável (v1 | v1-split | v1-big | v2 | v3 | v3-s5)
+make smoke           # health da aplicação em :8080 (na v3, também a query-api em :8081)
 make seed SCALE=1    # APAGA e carrega o dataset (1 = referência; 0.01 para testes manuais rápidos)
+                     # na v3, o projetor carrega o Mongo a partir do ledger (MongoSeed), sem o rebuild da v2
 make bench PHASE=v1  # benchmark da fase no ar (~1h20 com SCALE=1) -> docs/benchmarks/<data>-<fase>/
 make down            # make clean também apaga o volume do Postgres
 ```
@@ -60,6 +64,8 @@ O JDK 25 vem do `.tool-versions` (asdf). Não setar `JAVA_HOME` para outro JDK.
 - O Dockerfile treina o AOT cache **sem banco** (`spring.context.exit=onRefresh`, Flyway desligado).
   Qualquer bean que conecte ao banco durante o refresh quebra o build da imagem. Ao adicionar Spring
   Data JDBC, fixar `spring.data.jdbc.dialect=postgresql` para ele não consultar o banco na partida.
+  O registro de eventos do Modulith também consulta o banco na partida (`DatabaseType`), sem propriedade para
+  evitar: `EventRegistryDatabaseType` fixa o bean em POSTGRES.
 - O AOT cache só vale com as mesmas flags da JVM do treino: flags vão em `JVM_OPTS` (build arg e env).
 - A imagem `eclipse-temurin:25-jre` não tem curl nem wget; o healthcheck do compose usa `/dev/tcp` do bash.
 - O health do Actuator só lista componentes com `management.endpoint.health.show-components: always`.
@@ -77,16 +83,28 @@ O JDK 25 vem do `.tool-versions` (asdf). Não setar `JAVA_HOME` para outro JDK.
 - A latência de ler uma página fora do `shared_buffers` (`read_ms / shared_blks_read` no `pg_stat_statements`) variou de
   4 ms a 0,2 ms entre execuções da mesma v1 e decide se ela colapsa (6, 3 e 0 em 9). Informar junto de toda comparação.
 - O `pg_stat_statements.csv` guarda 400 caracteres por instrução: na v2, Q2 e Q4 têm o mesmo começo e aparecem somados.
+- Para testar uma fase sem apagar o dataset de outra, `COMPOSE_PROJECT_NAME=spring-cqrs-<x>` dá volumes próprios
+  (o `make` e o `run.sh` respeitam). Pare a outra fase antes (`make down`): as portas são as mesmas.
 - `docker-credential-desktop` pode travar (prompt do Keychain); imagens públicas baixam com
   `DOCKER_CONFIG` apontando para um `config.json` vazio.
+- Picos de um segundo somem na média de 5 s do `timeseries.csv`: use o `seconds.csv` (percentis por segundo do
+  Gatling). Os relatórios HTML em `bench/target` não são versionados.
+- O I/O do `docker stats` tem 3 algarismos significativos (10 MB de resolução na faixa de GB): serve para comparar
+  ordens de grandeza e saltos, não para bytes por comando no Postgres (passos de 100 MB).
+- O Grafana a 512 MB pode bater no limite e fazer GBs de I/O no disco compartilhado da VM (21/10). Confira a linha
+  dele no `docker-stats.csv` antes de atribuir uma cauda a uma fase.
+- O MongoDB 8 sai na partida em kernels de 6.19 a 7.0.13 (SERVER-121912). O `verify` do CI fica no `ubuntu-22.04`
+  por isso; o Docker Desktop local também pode chegar nessa faixa ao atualizar.
 
-## Marco atual: M4 — v3, CQRS físico (issue #5)
+## Marco atual: M4.5 — estudo de capacidade (issue #17)
 
-`command-api` (Postgres) e `query-api` (MongoDB) em containers separados, sincronizados por outbox (Spring Modulith)
-→ Kafka → projetor. O documento do Mongo é o bloco conta/mês da v2 (ADR-0011), então da v2 para a v3 mudam só o
-armazenamento e a consistência. Pronto quando os resultados v1×v2×v3 estão em `docs/benchmarks/`, H3, H5 e H7 respondidas
-e há trace ponta a ponta no Grafana. **Escopo congelado até o M6 (ADR-0011).**
-Lições até o M3: o colapso da v1 depende de leituras lentas (com o disco rápido, nem a v1 colapsa); a v2 lê 3–8 vezes
-menos páginas fora do cache e custa +40% por comando no banco (2,9 ms e 104 KB de WAL num bloco cheio). No colapso, o
-canal é a JVM compartilhada (heap e GC), não só o pool (ADR-0010): é isso que a v3 precisa mostrar que resolve. Medir
-v1, v2 e v3 no mesmo dia, cada uma com o seed recarregado, e ler "colapsou em k de 9" ao lado do tempo por página lida.
+Medir capacidade, não latência a taxa fixa ([ADR-0013](docs/adr/0013-estudo-de-capacidade.md)): cada fase sobe uma
+escada de carga e o resultado é o maior degrau sustentado (critérios absolutos e regra de parada no ADR, fixos). C1 =
+pico de leitura (escrita a 20/s), C2 = escrita intensa com busca (leitura a 75/s), em dias diferentes. Fases: v1, v1-big,
+v1-replica (nova: réplica streaming do Postgres, consultas na réplica), v2, v3; v3-s5 só no C1. As previsões P1–P7 já
+estão escritas no ADR: conferir contra elas, sem ajustar a régua depois. Antes do primeiro dia: confirmar a causa da
+cauda da v3 (S1 com o projetor parado, `pg_stat_wal`), Grafana desligado durante a medição, carga do host no `env.md`.
+Sem ajuste do WiredTiger para suavizar rajadas (vantagem de configuração).
+Lições do M4: longe da saturação a v3 só mostra custo fixo (3× memória, 2–5× CPU, Kafka > Postgres da v1) e uma cauda
+nos comandos (p99 ~110 ms) correlacionada com rajadas de escrita do Mongo no disco compartilhado; a v3 lê mais caro
+que a v2 em Q2/Q3 com o mesmo documento.

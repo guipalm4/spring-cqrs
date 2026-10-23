@@ -1,5 +1,8 @@
 # Uso: make up PHASE=v1 (ou docker compose -f infra/compose.yaml --profile v1 up -d)
 # PHASE=v1-split sobe o controle da #11: a mesma v1 com pools separados para comandos e consultas (ADR-0010).
+# PHASE=v1-big sobe o controle do ADR-0012: a mesma v1 com o hardware da v3 (o make exporta os PG_* do Postgres).
+# PHASE=v3 sobe o CQRS físico; PHASE=v3-s5 acrescenta a segunda query-api do S5 (H7). ADR-0012.
+# TRACE=1 (make up PHASE=v3 TRACE=1) sobe o Tempo e liga o profile trace nas JVMs da v3; nunca durante o benchmark.
 # Profiles e limites de recursos: docs/adr/0007-ambiente-de-execucao.md
 
 name: spring-cqrs
@@ -24,20 +27,21 @@ x-app-healthcheck: &app-healthcheck
 services:
   postgres:
     image: postgres:18.6
-    profiles: [v1, v1-split, v2, v3]
+    profiles: [v1, v1-split, v1-big, v2, v3, v3-s5]
     environment:
       POSTGRES_DB: ledger
       POSTGRES_USER: ledger
       POSTGRES_PASSWORD: ledger
-    # Configuração dimensionada para o container (2 CPUs, 2 GB) e comum a todas as fases (ADR-0009).
+    # Configuração dimensionada para o container (2 CPUs, 2 GB) e comum a todas as fases (ADR-0009). Só a v1-big
+    # muda os PG_*, pelo Makefile: os dois caches de leitura da v3 somados (ADR-0012).
     command:
       - postgres
       - -c
       - shared_preload_libraries=pg_stat_statements
       - -c
-      - shared_buffers=512MB
+      - shared_buffers=${PG_SHARED_BUFFERS:-512MB}
       - -c
-      - effective_cache_size=1536MB
+      - effective_cache_size=${PG_EFFECTIVE_CACHE_SIZE:-1536MB}
       - -c
       - work_mem=16MB
       - -c
@@ -55,8 +59,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
-    cpus: 2
-    mem_limit: 2g
+    cpus: ${PG_CPUS:-2}
+    mem_limit: ${PG_MEM:-2g}
 
   app-baseline: &app-baseline
     build:
@@ -102,10 +106,146 @@ services:
     cpus: 2
     mem_limit: 1g
 
+  # Controle do ADR-0012: mesma imagem da v1, com as duas JVMs da v3 somadas (4 CPUs, 2 GB, pool de 10).
+  app-baseline-big:
+    <<: *app-baseline
+    profiles: [v1-big]
+    cpus: 4
+    mem_limit: 2g
+
+  # --- v3: CQRS físico (ADR-0012). Um artefato, três papéis; cada peça do tamanho da peça equivalente da v1. ---
+
+  kafka:
+    image: apache/kafka:4.2.2
+    profiles: [v3, v3-s5]
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://:9092,CONTROLLER://:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      # O tópico ledger.entry-posted nasce no primeiro envio, com 6 partições (chave = conta).
+      KAFKA_NUM_PARTITIONS: 6
+      KAFKA_HEAP_OPTS: -Xms512m -Xmx512m
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server localhost:9092 > /dev/null"]
+      interval: 5s
+      timeout: 10s
+      retries: 24
+    cpus: 1
+    mem_limit: 1g
+
+  mongo:
+    image: mongo:8.0.34
+    profiles: [v3, v3-s5]
+    # Cache do WiredTiger igual ao shared_buffers do Postgres (ADR-0012).
+    command: ["--wiredTigerCacheSizeGB", "0.5"]
+    volumes:
+      - mongo-data:/data/db
+    ports: ["27017:27017"]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 5s
+      timeout: 5s
+      retries: 24
+    cpus: 2
+    mem_limit: 2g
+
+  command-api:
+    build: &app-cqrs-build
+      context: ..
+      args:
+        MODULE: app-cqrs
+        JVM_OPTS: *jvm-opts
+    image: spring-cqrs/app-cqrs:local
+    profiles: [v3, v3-s5]
+    environment:
+      <<: *app-env
+      LEDGER_PHASE: v3
+      SPRING_PROFILES_ACTIVE: command${TRACE_PROFILE:-}
+      OTLP_TRACES_ENDPOINT: http://tempo:4318/v1/traces
+      KAFKA_BOOTSTRAP: kafka:9092
+    ports: ["8080:8080"]
+    healthcheck: *app-healthcheck
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka:
+        condition: service_healthy
+    cpus: 2
+    mem_limit: 1g
+
+  projector:
+    build: *app-cqrs-build
+    image: spring-cqrs/app-cqrs:local
+    profiles: [v3, v3-s5]
+    environment:
+      <<: *app-env
+      LEDGER_PHASE: v3
+      SPRING_PROFILES_ACTIVE: projector${TRACE_PROFILE:-}
+      OTLP_TRACES_ENDPOINT: http://tempo:4318/v1/traces
+      KAFKA_BOOTSTRAP: kafka:9092
+      MONGO_URI: mongodb://mongo:27017/ledger?maxPoolSize=10
+    healthcheck: *app-healthcheck
+    depends_on:
+      kafka:
+        condition: service_healthy
+      mongo:
+        condition: service_healthy
+      # O DataSource do projetor só é usado pela carga do make seed; o schema é da command-api.
+      command-api:
+        condition: service_healthy
+    cpus: 1
+    mem_limit: 512m
+
+  query-api: &query-api
+    build: *app-cqrs-build
+    image: spring-cqrs/app-cqrs:local
+    profiles: [v3, v3-s5]
+    environment:
+      <<: *app-env
+      LEDGER_PHASE: v3
+      SPRING_PROFILES_ACTIVE: query${TRACE_PROFILE:-}
+      OTLP_TRACES_ENDPOINT: http://tempo:4318/v1/traces
+      MONGO_URI: mongodb://mongo:27017/ledger?maxPoolSize=10
+    ports: ["8081:8080"]
+    healthcheck: *app-healthcheck
+    depends_on:
+      mongo:
+        condition: service_healthy
+      # As migrações (Q1 e categorias no Postgres) são aplicadas pela command-api.
+      command-api:
+        condition: service_healthy
+    cpus: 2
+    mem_limit: 1g
+
+  # S5 (H7): segunda réplica da query-api; o Gatling alterna entre as duas (baseUrls).
+  query-api-2:
+    <<: *query-api
+    profiles: [v3-s5]
+    ports: ["8082:8080"]
+
+  # Trace ponta a ponta da v3 (ADR-0012): só com TRACE=1, fora do benchmark.
+  tempo:
+    image: grafana/tempo:2.10.9
+    profiles: [trace]
+    command: ["-config.file=/etc/tempo.yaml"]
+    volumes:
+      - ./tempo/tempo.yaml:/etc/tempo.yaml:ro
+    ports: ["3200:3200"]
+    cpus: 0.5
+    mem_limit: 512m
+
   # Métricas do Postgres para o Grafana (buffer hit ratio, conexões, locks); pg_stat_statements vem do make bench.
   postgres-exporter:
     image: prometheuscommunity/postgres-exporter:v0.20.1
-    profiles: [v1, v1-split, v2, v3]
+    profiles: [v1, v1-split, v1-big, v2, v3, v3-s5]
     environment:
       DATA_SOURCE_URI: postgres:5432/ledger?sslmode=disable
       DATA_SOURCE_USER: ledger
@@ -118,7 +258,7 @@ services:
 
   prometheus:
     image: prom/prometheus:v3.15.0
-    profiles: [v1, v1-split, v2, v3]
+    profiles: [v1, v1-split, v1-big, v2, v3, v3-s5]
     volumes:
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
     ports: ["9090:9090"]
@@ -127,7 +267,7 @@ services:
 
   grafana:
     image: grafana/grafana:13.2.4
-    profiles: [v1, v1-split, v2, v3]
+    profiles: [v1, v1-split, v1-big, v2, v3, v3-s5]
     environment:
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
@@ -141,3 +281,4 @@ services:
 
 volumes:
   postgres-data:
+  mongo-data:

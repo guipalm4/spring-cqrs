@@ -20,7 +20,8 @@ class CqrsApplicationTests {
     void healthIsUpWithDatabase() {
         var body = client().get().uri("/actuator/health").retrieve().body(String.class);
 
-        assertThat(body).contains("\"status\":\"UP\"").contains("\"db\"");
+        // Sem Mongo na v2: ele só existe na query-api e no projetor da v3.
+        assertThat(body).contains("\"status\":\"UP\"").contains("\"db\"").doesNotContain("mongo");
     }
 
     @Test

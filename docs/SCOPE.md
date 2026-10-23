@@ -77,6 +77,8 @@ justifica o OpenSearch no M5.
 | H5 | O custo da v3 é atraso de projeção mensurável e mais recursos | Atraso da projeção (p50/p99), CPU/RAM total, nº de containers |
 | H6 | OpenSearch supera Mongo e Postgres em Q4 com filtros combinados | p95 de Q4 |
 | H7 | Escalar só a `query-api` aumenta a vazão de leitura sem alterar a latência de escrita | Vazão de Q2/Q3 e p95 de comandos com 1 × 2 réplicas |
+| H8 | Uma réplica de leitura da v1 basta para proteger a escrita de picos de leitura (C1) | Maior degrau de leitura sustentado: v1-replica × v3 ([ADR-0013](adr/0013-estudo-de-capacidade.md)) |
+| H9 | Com escrita intensa, tirar os índices de leitura do modelo de escrita aumenta a capacidade de escrita, o que uma réplica não consegue (C2) | Maior degrau de escrita sustentado: v1, v1-replica × v3 ([ADR-0013](adr/0013-estudo-de-capacidade.md)) |
 
 Metodologia: [ADR-0005](adr/0005-metodologia-de-benchmark.md).
 
@@ -99,11 +101,14 @@ Cada marco é publicável sozinho (tag + PR + capítulo da história no README).
 | **M2 — Evidência** | Gatling, Grafana, resultados v1 com `EXPLAIN ANALYZE` | `make bench PHASE=v1` reproduz; H1 respondida em `docs/benchmarks/` |
 | **M3 — v2** | Projeções no mesmo Postgres | Resultados v1×v2; H2 e H4 respondidas |
 | **M4 — v3** | Outbox Modulith → Kafka → projetor Mongo; idempotência; métrica de atraso; `command-api` e `query-api` separados | Resultados v1×v2×v3; H3, H5 e H7 respondidas; trace ponta a ponta no Grafana |
+| **M4.5 — Capacidade** | Escadas de carga até a saturação (C1: pico de leitura; C2: escrita intensa com busca); fase `v1-replica`; Grafana fora da medição; diagnóstico da cauda da v3 | Maior degrau sustentado por fase nos dois cenários; H8 e H9 respondidas; H3 e H7 relidas no C1 |
 | **M5 — OpenSearch** | Segunda projeção (consumer group próprio) servindo Q4 | H6 respondida; demonstra 1 modelo de escrita → N modelos de leitura |
 | **M6 — Relato** | README comparativo, ADR "quando NÃO usar CQRS" | README conta a história com gráficos e links para cada tag |
 | **M7 — Camada AWS** | LocalStack + Terraform (`tflocal`); API Gateway roteando comandos → `command-api` e consultas → `query-api`; credenciais no Secrets Manager; `docs/aws-mapping.md` | `make aws-up` provisiona tudo do zero; chamadas via gateway funcionam; limitações do emulador documentadas |
 
-A tese do projeto está completa no M6, e o escopo até lá está congelado ([ADR-0011](adr/0011-v2-projecoes-e-escopo-congelado.md)). O M7 é um complemento: se o projeto parar antes dele, nada
+A tese do projeto está completa no M6. O escopo congelado do [ADR-0011](adr/0011-v2-projecoes-e-escopo-congelado.md)
+terminou com o [ADR-0013](adr/0013-estudo-de-capacidade.md), que acrescentou o M4.5; qualquer variante além dele
+continua exigindo um ADR. O M7 é um complemento: se o projeto parar antes dele, nada
 fica pela metade.
 
 **Stretch (fora do caminho crítico):** reconstrução de projeção a partir do ledger; Debezium como
@@ -139,3 +144,5 @@ docs/            # SCOPE, ADRs, benchmarks/
 | [0009](adr/0009-revisao-da-baseline-e-parametros-do-benchmark.md) | Revisão da baseline v1 (estatística, GIN compostos, Postgres e JVM) e parâmetros do benchmark |
 | [0010](adr/0010-controle-pools-separados.md) | Controle da #11: v1 com pools separados para comandos (2) e consultas (8), sem mudar a baseline |
 | [0011](adr/0011-v2-projecoes-e-escopo-congelado.md) | v2: projeções em blocos por conta e mês (forma do documento da v3); escopo congelado até o M6 |
+| [0012](adr/0012-v3-projecao-mongo-e-controle-de-hardware.md) | v3: projeção no Mongo, idempotência sem depender da ordem e controle de hardware (v1-big) |
+| [0013](adr/0013-estudo-de-capacidade.md) | Estudo de capacidade (C1, C2, v1-replica, H8, H9); encerra o escopo congelado |
