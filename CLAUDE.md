@@ -5,11 +5,11 @@ medindo cada fase. O valor do projeto está na comparação honesta, não em "CQ
 
 ## Fontes de verdade (ler antes de decidir algo)
 
-- `docs/SCOPE.md` — fases, domínio, consultas Q1–Q4, hipóteses H1–H7, marcos M0–M7.
+- `docs/SCOPE.md` — fases, domínio, consultas Q1–Q4, hipóteses H1–H9, marcos M0–M7 e M4.5.
 - `docs/api/openapi.json` — contrato REST congelado; `ApiContractTests` compara com `/v3/api-docs`.
   Mudança intencional: `./mvnw verify -Dcontract.update=true` e revisar o diff.
 - `docs/adr/` — decisões fechadas. **Não reabrir uma decisão sem escrever um ADR novo** que a substitua.
-- Issue do marco no GitHub (`gh issue view <n>`) — critérios de pronto. Marcos M0–M7 = issues #1–#8.
+- Issue do marco no GitHub (`gh issue view <n>`) — critérios de pronto. Marcos M0–M7 = issues #1–#8; M4.5 = #17.
 - `docs/diario.md` — o caminho até as decisões (o que acreditávamos, o que os dados mostraram, o que mudou, erros
   no meio). **Ao fim de toda sessão em que uma hipótese, um plano ou a leitura de um resultado mudou, uma entrada
   datada de 5 a 10 linhas, com links para a evidência.** Não repete os ADRs.
@@ -94,14 +94,15 @@ O JDK 25 vem do `.tool-versions` (asdf). Não setar `JAVA_HOME` para outro JDK.
 - O Grafana a 512 MB pode bater no limite e fazer GBs de I/O no disco compartilhado da VM (21/10). Confira a linha
   dele no `docker-stats.csv` antes de atribuir uma cauda a uma fase.
 
-## Marco atual: M4 — v3, CQRS físico (issue #5)
+## Marco atual: M4.5 — estudo de capacidade (issue #17)
 
-`command-api` (Postgres) e `query-api` (MongoDB) em containers separados, sincronizados por outbox (Spring Modulith)
-→ Kafka → projetor. O documento do Mongo é o bloco conta/mês da v2 (ADR-0011), então da v2 para a v3 mudam só o
-armazenamento e a consistência. Pronto quando os resultados v1×v2×v3 estão em `docs/benchmarks/`, H3, H5 e H7 respondidas
-e há trace ponta a ponta no Grafana. O ADR-0013 encerrou o escopo congelado: o M4 fecha com o dia de 21/10 (H5
-respondida; H3 e H7 inconclusivas a taxa fixa) e o estudo de capacidade (C1, C2, v1-replica) vira um marco antes do M5.
-Lições até o M3: o colapso da v1 depende de leituras lentas (com o disco rápido, nem a v1 colapsa); a v2 lê 3–8 vezes
-menos páginas fora do cache e custa +40% por comando no banco (2,9 ms e 104 KB de WAL num bloco cheio). No colapso, o
-canal é a JVM compartilhada (heap e GC), não só o pool (ADR-0010): é isso que a v3 precisa mostrar que resolve. Medir
-v1, v2 e v3 no mesmo dia, cada uma com o seed recarregado, e ler "colapsou em k de 9" ao lado do tempo por página lida.
+Medir capacidade, não latência a taxa fixa ([ADR-0013](docs/adr/0013-estudo-de-capacidade.md)): cada fase sobe uma
+escada de carga e o resultado é o maior degrau sustentado (critérios absolutos e regra de parada no ADR, fixos). C1 =
+pico de leitura (escrita a 20/s), C2 = escrita intensa com busca (leitura a 75/s), em dias diferentes. Fases: v1, v1-big,
+v1-replica (nova: réplica streaming do Postgres, consultas na réplica), v2, v3; v3-s5 só no C1. As previsões P1–P7 já
+estão escritas no ADR: conferir contra elas, sem ajustar a régua depois. Antes do primeiro dia: confirmar a causa da
+cauda da v3 (S1 com o projetor parado, `pg_stat_wal`), Grafana desligado durante a medição, carga do host no `env.md`.
+Sem ajuste do WiredTiger para suavizar rajadas (vantagem de configuração).
+Lições do M4: longe da saturação a v3 só mostra custo fixo (3× memória, 2–5× CPU, Kafka > Postgres da v1) e uma cauda
+nos comandos (p99 ~110 ms) correlacionada com rajadas de escrita do Mongo no disco compartilhado; a v3 lê mais caro
+que a v2 em Q2/Q3 com o mesmo documento.
