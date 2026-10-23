@@ -10,7 +10,9 @@ permissions:
 
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    # O MongoDB 8 se recusa a subir em kernels de 6.19 a 7.0.13 (SERVER-121912), e o ubuntu-latest (26.04) já está
+    # nessa faixa. O 22.04 (kernel 6.8) mantém nos testes a mesma imagem do benchmark (mongo:8.0.34).
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-java@v6
