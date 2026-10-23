@@ -93,6 +93,8 @@ O JDK 25 vem do `.tool-versions` (asdf). Não setar `JAVA_HOME` para outro JDK.
   ordens de grandeza e saltos, não para bytes por comando no Postgres (passos de 100 MB).
 - O Grafana a 512 MB pode bater no limite e fazer GBs de I/O no disco compartilhado da VM (21/10). Confira a linha
   dele no `docker-stats.csv` antes de atribuir uma cauda a uma fase.
+- O MongoDB 8 sai na partida em kernels de 6.19 a 7.0.13 (SERVER-121912). O `verify` do CI fica no `ubuntu-22.04`
+  por isso; o Docker Desktop local também pode chegar nessa faixa ao atualizar.
 
 ## Marco atual: M4.5 — estudo de capacidade (issue #17)
 
