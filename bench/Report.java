@@ -30,9 +30,9 @@ void main(String[] args) throws IOException {
         case "seconds" -> seconds(Path.of(args[1], "index.html"), Path.of(args[2]));
         case "summarize" -> summarize(Path.of(args[1]));
         case "chart" -> System.out.print(chart(Path.of(args[1]), args[2], args[3],
-                args.length > 4 ? Double.parseDouble(args[4]) : 1));
+                args.length > 4 ? Double.parseDouble(args[4]) : 1, args.length > 5 ? args[5] : null));
         default -> throw new IllegalArgumentException("uso: extract <relatório> <csv> | seconds <relatório> <csv> | "
-                + "summarize <resultados> | chart <timeseries.csv> <coluna> <título> [divisor]");
+                + "summarize <resultados> | chart <timeseries.csv|seconds.csv> <coluna> <título> [divisor] [y máximo]");
     }
 }
 
@@ -411,7 +411,8 @@ double[] mongoReads(Path csv) throws IOException {
 }
 
 /** Uma coluna do timeseries.csv como gráfico de linha; recusa série com lacunas, que o Mermaid desenharia contínua. */
-String chart(Path csv, String column, String title, double divisor) throws IOException {
+/** Com o y máximo, gráficos de execuções diferentes ficam na mesma escala. */
+String chart(Path csv, String column, String title, double divisor, String yMax) throws IOException {
     var lines = Files.readAllLines(csv);
     int index = List.of(lines.getFirst().split(",")).indexOf(column);
     if (index < 0) {
@@ -425,15 +426,17 @@ String chart(Path csv, String column, String title, double divisor) throws IOExc
         }
         values.add(Double.parseDouble(cells[index]) / divisor);
     }
-    var last = lines.getLast().split(",")[0];
+    // O timeseries.csv começa por t; o seconds.csv, pelo epoch, com o tempo relativo em t_s.
+    var header = List.of(lines.getFirst().split(","));
+    var last = lines.getLast().split(",")[Math.max(header.indexOf("t_s"), 0)];
     return """
             ```mermaid
             xychart-beta
                 title "%s"
                 x-axis "segundos desde o início" 0 --> %s
-                line [%s]
+            %s    line [%s]
             ```
-            """.formatted(title, last, join(values));
+            """.formatted(title, last, yMax == null ? "" : "    y-axis 0 --> " + yMax + "\n", join(values));
 }
 
 /** Barras na horizontal: com uma dúzia de execuções, os rótulos no eixo x se sobrepõem. */
