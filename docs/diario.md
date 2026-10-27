@@ -38,3 +38,17 @@ Até o M3, esse caminho está nos capítulos 1 a 3 do README ("O que mudou no en
 - O trace ponta a ponta só foi registrado hoje ([trace](trace/README.md)): o código existia desde 21/10, mas a
   evidência não estava em `docs/`. O primeiro comando depois da partida leva 765 ms, quase tudo no produtor do Kafka.
 - Na v1, os comandos ficaram mais rápidos com leitura do que sem (p50 de 8 para 4 ms). Não investigado; fica anotado.
+
+## 2026-10-27 — A bancada da capacidade, ensaiada antes de medir
+
+- O ADR-0013 mandava ler o fsync do WAL no `pg_stat_wal`. No PostgreSQL 18, esse tempo foi para o `pg_stat_io`
+  (`object = 'wal'`). Achado ao implementar, registrado como nota no ADR, sem mudar o critério.
+- A regra "CPU das fases baixa" do limite do gerador saiu como média por degrau. O ensaio (seed 0,01, projeto à parte,
+  fora do estudo) mostrou que a média engana: a 1200 consultas/s, a réplica da v1-replica saturou por 15 s, o app das
+  consultas morreu por falta de heap e a média ficou em 47%. A regra passou a usar o p90 das amostras, antes de qualquer
+  medição real.
+- Surpresa: acima do joelho, a v1 não perde vazão aos poucos, cai de uma vez. As threads virtuais aceitam requisições
+  sem limite (4945 esperando conexão) até o heap acabar. Isso não muda a capacidade medida, mas entra no capítulo.
+- Erro no meio: com degraus de 30 s, o degrau de 600/s parecia limite do gerador. Era o Gatling contando a vazão em
+  segundos inteiros (31 em vez de 30). O gerador sustentou 620 requisições/s em 90 s; acima disso, a fase caiu antes
+  dele, então o teto do gerador continua desconhecido.
