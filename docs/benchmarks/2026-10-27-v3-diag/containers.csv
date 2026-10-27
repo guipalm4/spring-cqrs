@@ -1,0 +1,9 @@
+container,cpus
+spring-cqrs-command-api-1,2.00
+spring-cqrs-kafka-1,1.00
+spring-cqrs-mongo-1,2.00
+spring-cqrs-postgres-1,2.00
+spring-cqrs-postgres-exporter-1,0.25
+spring-cqrs-projector-1,1.00
+spring-cqrs-prometheus-1,0.50
+spring-cqrs-query-api-1,2.00

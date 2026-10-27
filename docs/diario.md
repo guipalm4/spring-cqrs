@@ -52,3 +52,7 @@ Até o M3, esse caminho está nos capítulos 1 a 3 do README ("O que mudou no en
 - Erro no meio: com degraus de 30 s, o degrau de 600/s parecia limite do gerador. Era o Gatling contando a vazão em
   segundos inteiros (31 em vez de 30). O gerador sustentou 620 requisições/s em 90 s; acima disso, a fase caiu antes
   dele, então o teto do gerador continua desconhecido.
+- Diagnóstico da cauda da v3 com o seed de referência ([dados](benchmarks/2026-10-27-v3-diag/README.md)): com o
+  projetor parado, os picos acima de 60 ms caem de 28 para 2 em três pares intercalados, e o p99 vai de 41–143 para
+  14–19 ms. Nos segundos com pico, o fsync do WAL leva 4 a 5 vezes mais. A hipótese de 22/10 passa de "não confirmada"
+  para confirmada. Ainda não separado: se o comando espera o próprio fsync ou o lock da conta de quem está no fsync.
