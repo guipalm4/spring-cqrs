@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        phase: [v1, v2]
+        phase: [v1, v1-replica, v2]
     steps:
       - uses: actions/checkout@v7
       - name: Sobe a fase ${{ matrix.phase }}
