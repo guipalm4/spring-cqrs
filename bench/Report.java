@@ -3,13 +3,21 @@
 //   java bench/Report.java extract <relatório-gatling> <stats.csv>   tabela do index.html -> CSV
 //   java bench/Report.java seconds <relatório-gatling> <seconds.csv> percentis por segundo do index.html -> CSV
 //   java bench/Report.java summarize <docs/benchmarks/...>           runs/*/r*/stats.csv -> summary.md
-//   java bench/Report.java chart <timeseries.csv> <coluna> <título> [divisor]   série -> gráfico Mermaid (stdout)
+//   java bench/Report.java chart <timeseries.csv|seconds.csv> <coluna> <título> [divisor] [y máximo]
+//                                                                    série -> gráfico Mermaid (stdout)
+//   java bench/Report.java step <docs/benchmarks/.../runs/<degrau>>  veredito de um degrau da escada (ADR-0013);
+//                                                                    sai com 0 (sustentado), 1 (não) ou 2 (gerador)
+//   java bench/Report.java stopped-at <docs/benchmarks/...>          taxa do degrau em que a fase parou, se parou
+//                                                                    por limite dela (nada se não parou ou se foi o
+//                                                                    gerador)
+//   java bench/Report.java capacity <docs/benchmarks/...>...         maior degrau sustentado por fase, com gráfico
 //
 // O Gatling 3.16 não grava mais stats.json: as estatísticas só existem na tabela do index.html. Os percentis
 // incluem requisições OK e KO, e o resumo mostra o % de KO ao lado para não esconder falhas.
 //
-// Cada execução é classificada como estável ou colapso pelo p95 global (ADR-0009). O critério fica aqui, igual
-// para todas as fases, para a contagem "colapsou em k de n" não ser decidida depois de ver o resultado.
+// Cada execução é classificada como estável ou colapso pelo p95 global (ADR-0009), e cada degrau da escada como
+// sustentado ou não (ADR-0013). Os critérios ficam aqui, iguais para todas as fases, para não serem decididos depois
+// de ver o resultado.
 
 static final List<String> COLUMNS = List.of("total", "ok", "ko", "pct_ko", "rps", "min", "p50", "p75", "p95",
         "p99", "max", "mean", "stddev");
@@ -21,6 +29,22 @@ static final Pattern VALUE = Pattern.compile("<td class=\"value \\w+ col-(\\d+)\
 static final List<String> PERCENTILES = List.of("min", "25%", "50%", "75%", "80%", "85%", "90%", "95%", "99%", "max");
 static final Pattern POINT = Pattern.compile("\\[(\\d+), (\\d+)\\]");
 static final double COLLAPSE_P95_MS = 5_000;
+// Degrau sustentado numa repetição (ADR-0013, decisão 1): limites absolutos, os mesmos para todas as fases.
+static final double COMMANDS_P95_MS = 50;
+static final double QUERIES_P95_MS = 250;
+static final double MAX_KO_PCT = 1;
+static final double MIN_THROUGHPUT = 0.98;
+/** Fases com consistência eventual (v3 e v1-replica): atraso p99 e fila no fim do degrau, em segundos de escrita. */
+static final double MAX_LAG_P99_S = 2;
+static final double MAX_QUEUE_S = 1;
+/**
+ * Vazão abaixo da oferecida com as fases ociosas é limite do gerador, não da fase (ADR-0013, decisão 2). "Ociosa":
+ * nenhum container da fase passou, em média, de metade do seu limite de CPU. É a leitura operacional do ADR, fixada
+ * aqui antes da primeira medição.
+ */
+static final double GENERATOR_MAX_CPU_SHARE = 0.5;
+/** Containers de observação, fora da conta de CPU da fase. */
+static final Pattern OBSERVERS = Pattern.compile("grafana|prometheus|exporter|tempo");
 /** Instruções que um comando executa: escritas e o lock da conta. */
 static final Pattern WRITE = Pattern.compile("^\"?(INSERT|UPDATE|DELETE)\\b|FOR UPDATE", Pattern.CASE_INSENSITIVE);
 
@@ -31,8 +55,16 @@ void main(String[] args) throws IOException {
         case "summarize" -> summarize(Path.of(args[1]));
         case "chart" -> System.out.print(chart(Path.of(args[1]), args[2], args[3],
                 args.length > 4 ? Double.parseDouble(args[4]) : 1, args.length > 5 ? args[5] : null));
+        case "step" -> {
+            var step = judgeStep(Path.of(args[1]));
+            System.out.println(step.describe());
+            System.exit(step.exitCode());
+        }
+        case "stopped-at" -> stoppedAt(Path.of(args[1])).ifPresent(System.out::println);
+        case "capacity" -> System.out.print(capacity(Arrays.stream(args).skip(1).map(Path::of).toList()));
         default -> throw new IllegalArgumentException("uso: extract <relatório> <csv> | seconds <relatório> <csv> | "
-                + "summarize <resultados> | chart <timeseries.csv|seconds.csv> <coluna> <título> [divisor] [y máximo]");
+                + "summarize <resultados> | chart <timeseries.csv|seconds.csv> <coluna> <título> [divisor] [y máximo] | "
+                + "step <degrau> | stopped-at <resultados> | capacity <resultados>...");
     }
 }
 
@@ -144,11 +176,13 @@ void summarize(Path results) throws IOException {
             }
         }
     }
+    capacityRuns(runs, out);
     states(runs, out);
     pools(runs, out);
     jvms(runs, out);
     projection(runs, out);
     reads(runs, out);
+    writes(runs, out);
     out.append("""
 
             ## Pool e banco por cenário
@@ -194,7 +228,7 @@ void states(Path runs, StringBuilder out) throws IOException {
                 collapsed.add(rep.getFileName().toString());
             }
             if (!Double.isNaN(commands.get("p95"))) {
-                labels.add(readLoad(scenario) + ", " + rep.getFileName());
+                labels.add(loadLabel(scenario) + ", " + rep.getFileName());
                 commandP95.add(commands.get("p95") / 1000);
             }
             table.append("| ").append(scenario.getFileName()).append(" | ").append(rep.getFileName())
@@ -360,6 +394,10 @@ void reads(Path runs, StringBuilder out) throws IOException {
     for (var scenario : subdirectories(runs)) {
         for (var rep : subdirectories(scenario)) {
             double[] postgres = postgresReads(rep.resolve("pg_stat_statements.csv"));
+            double[] replica = postgresReads(rep.resolve("pg_stat_statements-replica.csv"));
+            if (!Double.isNaN(replica[0])) {
+                postgres = new double[] {postgres[0] + replica[0], postgres[1] + replica[1]};
+            }
             double[] mongo = mongoReads(rep.resolve("mongo-cache.csv"));
             table.append("| ").append(scenario.getFileName()).append(" | ").append(rep.getFileName())
                     .append(" | ").append(fmt(postgres[0], 0))
@@ -374,8 +412,8 @@ void reads(Path runs, StringBuilder out) throws IOException {
             ## Leitura de disco por execução
 
             Páginas lidas fora do cache e tempo médio por página, em ms. Postgres: soma das instruções do
-            pg_stat_statements (as 50 mais caras). Mongo: leituras das threads da aplicação para o cache do WiredTiger.
-            — quando o store não existe na fase.
+            pg_stat_statements (as 50 mais caras; na v1-replica, do primário e da réplica somados). Mongo: leituras das
+            threads da aplicação para o cache do WiredTiger. — quando o store não existe na fase.
 
             | Cenário | Rep. | Postgres: páginas | ms/página | Mongo: páginas | ms/página |
             |---|---|---:|---:|---:|---:|
@@ -410,8 +448,10 @@ double[] mongoReads(Path csv) throws IOException {
     return new double[] {reads, micros / 1000};
 }
 
-/** Uma coluna do timeseries.csv como gráfico de linha; recusa série com lacunas, que o Mermaid desenharia contínua. */
-/** Com o y máximo, gráficos de execuções diferentes ficam na mesma escala. */
+/**
+ * Uma coluna do timeseries.csv (ou do seconds.csv) como gráfico de linha; recusa série com lacunas, que o Mermaid
+ * desenharia contínua. Com o y máximo, gráficos de execuções diferentes ficam na mesma escala.
+ */
 String chart(Path csv, String column, String title, double divisor, String yMax) throws IOException {
     var lines = Files.readAllLines(csv);
     int index = List.of(lines.getFirst().split(",")).indexOf(column);
@@ -455,6 +495,393 @@ static String mermaid(String type, String title, List<String> labels, String uni
 
 static String join(List<Double> values) {
     return values.stream().map(v -> String.format(Locale.ROOT, "%.2f", v)).collect(Collectors.joining(", "));
+}
+
+// --- Capacidade (ADR-0013) -------------------------------------------------------------------------------------
+
+enum State { SUSTAINED, NOT_SUSTAINED, GENERATOR }
+
+/** Uma repetição de um degrau: o estado, os critérios que falharam e os números que os decidiram. */
+record Verdict(String rep, State state, List<String> failures, double throughput, double commandsP95,
+        double queriesP95, double ko, double lagP99, double queueS) {
+
+    String label() {
+        return switch (state) {
+            case SUSTAINED -> "sustentado";
+            case NOT_SUSTAINED -> "**não sustentado**";
+            case GENERATOR -> "limite do gerador";
+        };
+    }
+}
+
+/** Um degrau: sustentado em pelo menos 2 de 3 repetições (ou na proporção equivalente, num ensaio com menos). */
+record StepVerdict(String name, double rate, List<Verdict> reps) {
+
+    long count(State state) {
+        return reps.stream().filter(v -> v.state() == state).count();
+    }
+
+    int needed() {
+        return (int) Math.ceil(reps.size() * 2.0 / 3);
+    }
+
+    State state() {
+        if (count(State.SUSTAINED) >= needed()) {
+            return State.SUSTAINED;
+        }
+        return count(State.SUSTAINED) + count(State.GENERATOR) >= needed() ? State.GENERATOR : State.NOT_SUSTAINED;
+    }
+
+    int exitCode() {
+        return switch (state()) {
+            case SUSTAINED -> 0;
+            case NOT_SUSTAINED -> 1;
+            case GENERATOR -> 2;
+        };
+    }
+
+    /** Os critérios que falharam e em quantas repetições, sem os números: "comandos p95 (2 de 3), vazão (3 de 3)". */
+    String causes() {
+        var counts = new LinkedHashMap<String, Integer>();
+        for (var rep : reps) {
+            rep.failures().stream().map(failure -> failure.replaceFirst(" [\\d.,]+.*$", "")).distinct()
+                    .forEach(cause -> counts.merge(cause, 1, Integer::sum));
+        }
+        return counts.entrySet().stream().map(e -> e.getKey() + " (" + e.getValue() + " de " + reps.size() + ")")
+                .collect(Collectors.joining(", "));
+    }
+
+    String describe() {
+        var out = new StringBuilder(name).append(": ").append(switch (state()) {
+            case SUSTAINED -> "sustentado";
+            case NOT_SUSTAINED -> "não sustentado";
+            case GENERATOR -> "limitado pelo gerador";
+        }).append(" (").append(count(State.SUSTAINED)).append(" de ").append(reps.size()).append(")");
+        for (var rep : reps) {
+            if (!rep.failures().isEmpty()) {
+                out.append("; ").append(rep.rep()).append(": ").append(String.join(", ", rep.failures()));
+            }
+        }
+        return out.toString();
+    }
+}
+
+StepVerdict judgeStep(Path step) throws IOException {
+    var verdicts = new ArrayList<Verdict>();
+    for (var rep : subdirectories(step).stream().filter(dir -> Files.exists(dir.resolve("stats.csv"))).toList()) {
+        verdicts.add(judge(rep));
+    }
+    if (verdicts.isEmpty()) {
+        throw new IllegalStateException("nenhuma repetição em " + step);
+    }
+    var properties = scenarioProperties(step);
+    var varying = step.getFileName().toString().startsWith("c2-") ? "writeRate" : "readRate";
+    return new StepVerdict(step.getFileName().toString(), Double.parseDouble(properties.getProperty(varying)), verdicts);
+}
+
+/** Critério do ADR-0013 numa repetição; a vazão baixa com a fase ociosa conta como limite do gerador. */
+Verdict judge(Path rep) throws IOException {
+    var properties = scenarioProperties(rep.getParent());
+    double write = Double.parseDouble(properties.getProperty("writeRate"));
+    double read = Double.parseDouble(properties.getProperty("readRate"));
+    var stats = loadStats(rep.resolve("stats.csv"));
+    var none = new Stats(Map.of());
+    var global = stats.get("Global");
+    double throughput = global.get("rps") / (write + read);
+    double commandsP95 = stats.getOrDefault("comandos", none).get("p95");
+    double queriesP95 = stats.getOrDefault("consultas", none).get("p95");
+    double ko = global.get("pct_ko");
+    double[] lag = eventualLag(rep, write);
+
+    var failures = new ArrayList<String>();
+    if (commandsP95 > COMMANDS_P95_MS) {
+        failures.add("comandos p95 " + fmt(commandsP95, 0) + " ms");
+    }
+    if (queriesP95 > QUERIES_P95_MS) {
+        failures.add("consultas p95 " + fmt(queriesP95, 0) + " ms");
+    }
+    if (ko > MAX_KO_PCT) {
+        failures.add("KO " + fmt(ko, 1) + "%");
+    }
+    if (lag[0] > MAX_LAG_P99_S) {
+        failures.add("atraso p99 " + fmt(lag[0], 1) + " s");
+    }
+    if (lag[1] > MAX_QUEUE_S) {
+        failures.add("fila no fim " + fmt(lag[1], 1) + " s");
+    }
+    State state;
+    if (throughput >= MIN_THROUGHPUT) {
+        state = failures.isEmpty() ? State.SUSTAINED : State.NOT_SUSTAINED;
+    } else {
+        double cpu = phaseCpuShare(rep);
+        boolean idle = cpu < GENERATOR_MAX_CPU_SHARE;
+        failures.add("vazão " + percent(throughput, 0) + " da oferecida (CPU da fase até " + percent(cpu, 0)
+                + " do limite)");
+        state = failures.size() == 1 && idle ? State.GENERATOR : State.NOT_SUSTAINED;
+    }
+    return new Verdict(rep.getFileName().toString(), state, failures, throughput, commandsP95, queriesP95, ko,
+            lag[0], lag[1]);
+}
+
+/**
+ * {atraso p99 em s, fila no fim em segundos de escrita} nas fases com consistência eventual; NaN nas outras. Na v3,
+ * o atraso é o do projetor (histograma do ledger.projection.lag) e a fila, o outbox mais o lag do consumer group
+ * (queue.csv) dividido pela taxa de escrita. Na v1-replica, o atraso é o replay_lag amostrado a cada segundo e a fila,
+ * o WAL ainda não aplicado no fim dividido pelo WAL gerado por segundo na execução (pg-seconds.csv).
+ */
+double[] eventualLag(Path rep, double writeRate) throws IOException {
+    var metrics = loadMetrics(List.of(rep));
+    var queue = rep.resolve("queue.csv");
+    if (Files.exists(queue)) {
+        var values = new HashMap<String, Double>();
+        for (var line : Files.readAllLines(queue).stream().skip(1).toList()) {
+            var cells = line.split(",");
+            values.put(cells[0], Double.parseDouble(cells[1]));
+        }
+        double entries = values.getOrDefault("outbox_end", 0.0) + values.getOrDefault("kafka_lag_end", 0.0);
+        return new double[] {metrics.getOrDefault("projection_lag_p99_s", Double.NaN),
+                writeRate > 0 ? entries / writeRate : Double.NaN};
+    }
+    var seconds = rep.resolve("pg-seconds.csv");
+    if (!Files.exists(seconds)) {
+        return new double[] {Double.NaN, Double.NaN};
+    }
+    var rows = Files.readAllLines(seconds).stream().skip(1).map(line -> line.split(",", -1))
+            .filter(cells -> cells.length == 8).toList();
+    if (rows.stream().noneMatch(cells -> !cells[7].isBlank())) {
+        return new double[] {Double.NaN, Double.NaN}; // sem réplica
+    }
+    // Sem WAL novo, o Postgres zera o replay_lag (vazio): a réplica está em dia.
+    var lags = rows.stream().mapToDouble(cells -> cells[6].isBlank() ? 0 : Double.parseDouble(cells[6])).sorted()
+            .toArray();
+    double p99 = lags[Math.max(0, (int) Math.ceil(lags.length * 0.99) - 1)];
+    var first = rows.getFirst();
+    var last = rows.getLast();
+    double elapsed = Double.parseDouble(last[0]) - Double.parseDouble(first[0]);
+    double walPerSecond = (Double.parseDouble(last[5]) - Double.parseDouble(first[5])) / elapsed;
+    double endBytes = last[7].isBlank() ? 0 : Double.parseDouble(last[7]);
+    return new double[] {p99, walPerSecond > 0 ? endBytes / walPerSecond : Double.NaN};
+}
+
+/** Maior fração do limite de CPU usada em média por um container da fase (docker-stats.csv e containers.csv). */
+double phaseCpuShare(Path rep) throws IOException {
+    var limits = new HashMap<String, Double>();
+    var containers = rep.getParent().getParent().getParent().resolve("containers.csv");
+    var stats = rep.resolve("docker-stats.csv");
+    if (!Files.exists(containers) || !Files.exists(stats)) {
+        return Double.NaN; // sem os limites, não dá para atribuir a vazão baixa ao gerador
+    }
+    for (var line : Files.readAllLines(containers).stream().skip(1).toList()) {
+        var cells = line.split(",");
+        limits.put(cells[0], Double.parseDouble(cells[1]));
+    }
+    var sums = new HashMap<String, double[]>();
+    for (var line : Files.readAllLines(stats)) {
+        var cells = line.split(",");
+        if (cells.length < 3 || OBSERVERS.matcher(cells[1]).find() || !limits.containsKey(cells[1])) {
+            continue;
+        }
+        try {
+            double cpu = Double.parseDouble(cells[2].replace("%", ""));
+            var sum = sums.computeIfAbsent(cells[1], _ -> new double[2]);
+            sum[0] += cpu;
+            sum[1]++;
+        } catch (NumberFormatException _) {
+            // container saindo do ar no meio da amostra ("--")
+        }
+    }
+    return sums.entrySet().stream().mapToDouble(e -> e.getValue()[0] / e.getValue()[1] / 100 / limits.get(e.getKey()))
+            .max().orElse(Double.NaN);
+}
+
+List<StepVerdict> steps(Path results) throws IOException {
+    var verdicts = new ArrayList<StepVerdict>();
+    for (var step : subdirectories(results.resolve("runs"))) {
+        if (step.getFileName().toString().matches("c[12]-.*")) {
+            verdicts.add(judgeStep(step));
+        }
+    }
+    verdicts.sort(Comparator.comparingDouble(StepVerdict::rate));
+    return verdicts;
+}
+
+/** Taxa do primeiro degrau não sustentado por limite da fase; vazio se a fase sustentou todos ou parou no gerador. */
+Optional<String> stoppedAt(Path results) throws IOException {
+    for (var step : steps(results)) {
+        if (step.state() == State.NOT_SUSTAINED) {
+            return Optional.of(fmt(step.rate(), 0).replace(",", ""));
+        }
+        if (step.state() == State.GENERATOR) {
+            return Optional.empty();
+        }
+    }
+    return Optional.empty();
+}
+
+/** Maior degrau sustentado, ou NaN se nenhum. */
+double maxSustained(List<StepVerdict> steps) {
+    double max = Double.NaN;
+    for (var step : steps) {
+        if (step.state() != State.SUSTAINED) {
+            break;
+        }
+        max = step.rate();
+    }
+    return max;
+}
+
+/** Tabela e gráfico do maior degrau sustentado por fase, para o capítulo (fases do mesmo dia e do mesmo cenário). */
+String capacity(List<Path> phases) throws IOException {
+    var table = new StringBuilder();
+    var labels = new ArrayList<String>();
+    var values = new ArrayList<Double>();
+    String unit = "?";
+    for (var results : phases) {
+        var steps = steps(results);
+        if (steps.isEmpty()) {
+            continue;
+        }
+        var name = results.getFileName().toString().replaceFirst("^\\d{4}-\\d{2}-\\d{2}-(c[12]-)?", "");
+        unit = steps.getFirst().name().startsWith("c2-") ? "comandos/s" : "consultas/s";
+        double max = maxSustained(steps);
+        var stop = steps.stream().filter(step -> step.state() != State.SUSTAINED).findFirst();
+        table.append("| ").append(name)
+                .append(" | ").append(Double.isNaN(max) ? "nenhum" : fmt(max, 0))
+                .append(" | ").append(stop.map(step -> fmt(step.rate(), 0)).orElse("— (sustentou todos)"))
+                .append(" | ").append(stop.map(step -> (step.state() == State.GENERATOR ? "gerador: " : "")
+                        + step.causes()).orElse("—"))
+                .append(" |\n");
+        labels.add(name);
+        values.add(Double.isNaN(max) ? 0 : max);
+    }
+    return """
+            Maior degrau sustentado em pelo menos 2 de 3 repetições (ADR-0013), em %s. Gerado por
+            `java bench/Report.java capacity`.
+
+            | Fase | Maior degrau sustentado | Parou em | Por quê |
+            |---|---:|---:|---|
+            """.formatted(unit) + table + "\n" + mermaid("bar", "Maior degrau sustentado (" + unit + ")", labels, unit,
+            values);
+}
+
+/** Seção do summary.md com o critério aplicado a cada repetição da escada. */
+void capacityRuns(Path runs, StringBuilder out) throws IOException {
+    var steps = steps(runs.getParent());
+    if (steps.isEmpty()) {
+        return;
+    }
+    var table = new StringBuilder();
+    var lines = new StringBuilder();
+    for (var step : steps) {
+        lines.append("- ").append(step.describe()).append("\n");
+        for (var v : step.reps()) {
+            table.append("| ").append(step.name()).append(" | ").append(v.rep()).append(" | ").append(v.label())
+                    .append(" | ").append(percent(v.throughput(), 1))
+                    .append(" | ").append(fmt(v.commandsP95(), 0))
+                    .append(" | ").append(fmt(v.queriesP95(), 0))
+                    .append(" | ").append(fmt(v.ko(), 1))
+                    .append(" | ").append(fmt(v.lagP99(), 2))
+                    .append(" | ").append(fmt(v.queueS(), 2))
+                    .append(" |\n");
+        }
+    }
+    double max = maxSustained(steps);
+    out.append("""
+
+            ## Capacidade
+
+            Critério do ADR-0013 por repetição: p95 dos comandos ≤ %s ms, p95 das consultas ≤ %s ms, KO ≤ %s%%,
+            vazão ≥ %s da oferecida e, com consistência eventual, atraso p99 ≤ %s s e fila no fim ≤ %s s de escrita.
+            Vazão baixa com nenhum container da fase acima de %s do seu limite de CPU é limite do gerador. Degrau
+            sustentado: em pelo menos 2 de 3 repetições. **Maior degrau sustentado: %s.**
+
+            """.formatted(fmt(COMMANDS_P95_MS, 0), fmt(QUERIES_P95_MS, 0), fmt(MAX_KO_PCT, 0),
+            percent(MIN_THROUGHPUT, 0), fmt(MAX_LAG_P99_S, 0), fmt(MAX_QUEUE_S, 0),
+            percent(GENERATOR_MAX_CPU_SHARE, 0), Double.isNaN(max) ? "nenhum" : fmt(max, 0) + " " + loadUnit(steps)))
+            .append(lines).append("""
+
+            Vazão em % da oferecida; p95 em ms, no cliente; KO em %; atraso p99 em s; fila no fim em segundos de
+            escrita (— sem consistência eventual).
+
+            | Degrau | Rep. | Estado | Vazão | p95 comandos | p95 consultas | % KO | Atraso p99 | Fila no fim |
+            |---|---|---|---:|---:|---:|---:|---:|---:|
+            """).append(table);
+}
+
+String loadUnit(List<StepVerdict> steps) {
+    return steps.getFirst().name().startsWith("c2-") ? "comandos/s" : "consultas/s";
+}
+
+/**
+ * Escrita em disco por execução (ADR-0013, a cauda dos comandos da v3): WAL gerado e fsyncs do WAL com o tempo médio
+ * de cada um (pg_stat_io), e o que o WiredTiger gravou, por comando.
+ */
+void writes(Path runs, StringBuilder out) throws IOException {
+    var table = new StringBuilder();
+    for (var scenario : subdirectories(runs)) {
+        for (var rep : subdirectories(scenario)) {
+            var seconds = rep.resolve("pg-seconds.csv");
+            if (!Files.exists(seconds) || !Files.exists(rep.resolve("stats.csv"))) {
+                continue;
+            }
+            var rows = Files.readAllLines(seconds).stream().skip(1).map(line -> line.split(",", -1))
+                    .filter(cells -> cells.length == 8 && !cells[5].isBlank()).toList();
+            if (rows.size() < 2) {
+                continue;
+            }
+            var first = rows.getFirst();
+            var last = rows.getLast();
+            double commands = loadStats(rep.resolve("stats.csv")).getOrDefault("comandos", new Stats(Map.of()))
+                    .get("total");
+            double wal = delta(first, last, 5);
+            double fsyncs = delta(first, last, 3);
+            double fsyncMs = delta(first, last, 4);
+            double mongo = mongoWritten(rep.resolve("mongo-cache.csv"));
+            table.append("| ").append(scenario.getFileName()).append(" | ").append(rep.getFileName())
+                    .append(" | ").append(fmt(wal / 1048576, 0))
+                    .append(" | ").append(fmt(wal / commands / 1024, 1))
+                    .append(" | ").append(fmt(fsyncs, 0))
+                    .append(" | ").append(fmt(fsyncMs / fsyncs, 2))
+                    .append(" | ").append(fmt(mongo / commands / 1024, 1))
+                    .append(" |\n");
+        }
+    }
+    if (table.isEmpty()) {
+        return;
+    }
+    out.append("""
+
+            ## Escrita em disco por execução
+
+            WAL gerado no Postgres primário (MB e KB por comando), fsyncs do WAL e o tempo médio de cada um, em ms
+            (pg_stat_io com track_wal_io_timing), e bytes gravados em disco pelo WiredTiger por comando, em KB (block
+            manager; — sem Mongo). Os contadores do pg_stat_io chegam com até ~1 s de atraso; a série por segundo está
+            no `pg-seconds.csv` de cada execução.
+
+            | Cenário | Rep. | WAL (MB) | WAL por comando | fsyncs | ms por fsync | Mongo por comando |
+            |---|---|---:|---:|---:|---:|---:|
+            """).append(table);
+}
+
+static double delta(String[] first, String[] last, int column) {
+    if (first[column].isBlank() || last[column].isBlank()) {
+        return Double.NaN;
+    }
+    return Double.parseDouble(last[column]) - Double.parseDouble(first[column]);
+}
+
+/** Bytes gravados em disco pelo WiredTiger na execução; NaN sem Mongo ou num mongo-cache.csv anterior ao ADR-0013. */
+double mongoWritten(Path csv) throws IOException {
+    if (!Files.exists(csv)) {
+        return Double.NaN;
+    }
+    var lines = Files.readAllLines(csv);
+    var before = lines.get(1).split(",");
+    var after = lines.get(2).split(",");
+    if (before.length < 7) {
+        return Double.NaN;
+    }
+    return Double.parseDouble(after[6]) - Double.parseDouble(before[6]);
 }
 
 /** Soma do tempo médio das instruções que um comando executa; sem escritas (só leitura), não se aplica. */
@@ -527,14 +954,22 @@ String parameters(Path scenario) throws IOException {
             .map(line -> "`" + line + "`").collect(Collectors.joining(" · ", "", "\n\n"));
 }
 
-/** Rótulo da carga de leitura do cenário, a partir do scenario.properties. */
-String readLoad(Path scenario) throws IOException {
+/** Rótulo da carga que varia no cenário: a leitura, ou a escrita na escada do C2 (ADR-0013). */
+String loadLabel(Path scenario) throws IOException {
+    var properties = scenarioProperties(scenario);
+    if (scenario.getFileName().toString().startsWith("c2-")) {
+        return properties.getProperty("writeRate", "?") + " comandos/s";
+    }
+    var read = properties.getProperty("readRate", "?");
+    return read.equals("0") ? "só escrita" : read + " consultas/s";
+}
+
+Properties scenarioProperties(Path scenario) throws IOException {
     var properties = new Properties();
     try (var reader = Files.newBufferedReader(scenario.resolve("scenario.properties"))) {
         properties.load(reader);
     }
-    var read = properties.getProperty("readRate", "?");
-    return read.equals("0") ? "só escrita" : read + " consultas/s";
+    return properties;
 }
 
 /** Global e grupos primeiro; depois as requisições de cada grupo. */
