@@ -42,7 +42,9 @@ java bench/analysis/CommandTail.java docs/benchmarks/2026-10-27-v3-diag s1-sem-p
   disco, e não à CPU, é a correlação com o tempo de fsync (o número de fsyncs não muda) e com os saltos de escrita do
   Mongo.
 - A janela de dois segundos para o fsync foi escolhida depois de ver os dados, por causa do atraso de publicação do
-  `pg_stat_io`. Com um segundo só, a diferença é a mesma em direção, mas mais ruidosa.
+  `pg_stat_io`. Só o segundo do pico não basta: na r1, ele dá o contrário (17 contra 31 ms). O segundo seguinte dá
+  116–194 ms nos picos, contra 21–28 ms, nas três repetições, o que bate com o atraso de publicação, mas também foi
+  visto depois dos dados.
 - Os outliers aparecem também dentro de instruções (um `INSERT INTO ledger_entry` de 165 ms, o `SELECT ... FOR UPDATE`
   da conta a 68 ms), não só no commit. Isso é compatível com quem espera o lock da conta ou a escrita do WAL de outra
   transação que está no fsync, mas não foi separado.
