@@ -375,3 +375,8 @@ leitura crescente (S3) e só leitura (S2), com aquecimento descartado e três re
 Metodologia no [ADR-0005](docs/adr/0005-metodologia-de-benchmark.md), parâmetros e revisão da baseline no
 [ADR-0009](docs/adr/0009-revisao-da-baseline-e-parametros-do-benchmark.md), resultados em
 [docs/benchmarks](docs/benchmarks).
+
+A partir do M4.5, `make bench CAPACITY=c1` (pico de leitura) ou `CAPACITY=c2` (escrita intensa) sobe uma escada de
+carga e para no primeiro degrau que a fase não sustenta; o resultado é o maior degrau sustentado
+([ADR-0013](docs/adr/0013-estudo-de-capacidade.md)). `CAPACITY=c1 bench/day.sh` mede todas as fases do cenário em
+sequência, cada uma com o dataset recarregado.

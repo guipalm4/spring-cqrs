@@ -29,6 +29,10 @@ Metodologia no [ADR-0005](../adr/0005-metodologia-de-benchmark.md); revisão da 
 | `runs/<cenário>/r<n>/pg_stat_statements.csv` | As instruções que mais consumiram tempo no Postgres (25 na v1, 50 a partir da #11) |
 | `runs/<cenário>/r<n>/prometheus.csv` | Pool do Hikari (total e, a partir da #11, por pool), CPU da aplicação e blocos lidos no Postgres |
 | `runs/<cenário>/r<n>/docker-stats.csv` | CPU, memória e I/O por container, amostrados durante a execução |
+| `containers.csv` | Limite de CPU de cada container (a partir do M4.5: separa o limite do gerador do da fase) |
+| `runs/<cenário>/r<n>/pg-seconds.csv` | A cada segundo: WAL gerado, escritas e fsyncs do WAL com os tempos (`pg_stat_io`) e, na v1-replica, o atraso da réplica (a partir do M4.5) |
+| `runs/<cenário>/r<n>/queue.csv` | v3: outbox e lag do consumer group no fim da execução (a partir do M4.5) |
+| `runs/<cenário>/r<n>/pg_stat_statements-replica.csv` | v1-replica: as instruções da réplica, onde rodam as consultas |
 | `runs/<cenário>/r<n>/seconds.csv` | Percentis por segundo do relatório do Gatling (a partir de 21/10; extraído também para as execuções anteriores) |
 | `runs/<cenário>/r<n>/timeseries.csv` | Série a cada 5 s, do Prometheus: vazão, erros e p95 (na aplicação) de comandos e consultas, fila e uso do pool, blocos lidos, CPU e heap |
 
@@ -41,7 +45,25 @@ make bench PHASE=v1    # ~1h20: aquecimento + 3 repetições de S1, S3 (3 taxas)
 ```
 
 A v2 usa `PHASE=v2`; trocar de fase exige `make clean` antes do `make up` (ADR-0011). A v3 usa `PHASE=v3`, e
-`PHASE=v3-s5` a sobe com duas `query-api`; `PHASE=v1-big` é a v1 com o hardware da v3 (ADR-0012).
+`PHASE=v3-s5` a sobe com duas `query-api`; `PHASE=v1-big` é a v1 com o hardware da v3 (ADR-0012); `PHASE=v1-replica`
+é a v1 com as consultas numa réplica streaming (ADR-0013).
+
+### Estudo de capacidade (ADR-0013)
+
+```bash
+CAPACITY=c1 bench/day.sh   # pico de leitura, todas as fases; 6–9 h, de madrugada, com o Mac parado
+CAPACITY=c2 bench/day.sh   # escrita intensa com busca, em outro dia
+```
+
+Cada fase sobe a escada até o primeiro degrau não sustentado (critério no `bench/Report.java`, `judge`); o `summary.md`
+de cada fase traz a seção "Capacidade", e `java bench/Report.java capacity docs/benchmarks/<dia>-c1-*` faz a tabela e
+o gráfico das fases do dia. Diagnóstico da cauda da v3 (S1 com e sem o projetor, intercalados):
+
+```bash
+make up PHASE=v3 && make seed PHASE=v3 SCALE=1
+SCENARIOS="s1 s1-sem-projetor" OUT=docs/benchmarks/<dia>-v3-diag make bench PHASE=v3
+java bench/analysis/CommandTail.java docs/benchmarks/<dia>-v3-diag s1-sem-projetor
+```
 
 O controle da [#11](https://github.com/guipalm4/spring-cqrs/issues/11) (v1 com pools separados,
 [ADR-0010](../adr/0010-controle-pools-separados.md)) usa `PHASE=v1-split` nos três comandos.

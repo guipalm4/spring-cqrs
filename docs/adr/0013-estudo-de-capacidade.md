@@ -193,6 +193,18 @@ Resultado contrário a qualquer previsão entra no capítulo igual.
   - **H9:** com escrita intensa, tirar os índices de leitura do modelo de escrita aumenta a capacidade de escrita, o
     que uma réplica não consegue (C2).
 
+### Notas de implementação (2026-10-27, antes de medir)
+
+- No PostgreSQL 18, o tempo de escrita e de fsync do WAL saiu do `pg_stat_wal` e foi para o `pg_stat_io`
+  (`object = 'wal'`); o `track_wal_io_timing` controla esse tempo lá. A bancada lê os dois, a cada segundo
+  (`pg-seconds.csv`).
+- "CPU das fases baixa", no limite do gerador (decisão 2), é: nenhum container da fase passou, em média, de metade do
+  seu limite de CPU no degrau. Os critérios ficam em `bench/Report.java` (`judge`), que a bancada usa para a regra de
+  parada.
+- A fila no fim do degrau é medida logo depois do Gatling: na v3, o outbox mais o lag do consumer group (o lag leva
+  alguns segundos para sair, a favor da v3); na v1-replica, o WAL ainda não aplicado dividido pelo WAL gerado por
+  segundo no degrau. Entre repetições, a execução seguinte só começa com a fila vazia.
+
 ## Alternativas consideradas
 
 - **Subir as taxas fixas até a v1 colapsar:** escolher o ponto de carga pelo resultado, o que o ADR-0009 recusou.

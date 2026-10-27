@@ -25,11 +25,13 @@ medindo cada fase. O valor do projeto está na comparação honesta, não em "CQ
 
 ```bash
 make verify          # build + testes (Testcontainers; precisa de Docker)
-make up PHASE=v1     # sobe a fase e espera ficar saudável (v1 | v1-split | v1-big | v2 | v3 | v3-s5)
+make up PHASE=v1     # sobe a fase e espera ficar saudável (v1 | v1-split | v1-big | v1-replica | v2 | v3 | v3-s5)
 make smoke           # health da aplicação em :8080 (na v3, também a query-api em :8081)
 make seed SCALE=1    # APAGA e carrega o dataset (1 = referência; 0.01 para testes manuais rápidos)
                      # na v3, o projetor carrega o Mongo a partir do ledger (MongoSeed), sem o rebuild da v2
 make bench PHASE=v1  # benchmark da fase no ar (~1h20 com SCALE=1) -> docs/benchmarks/<data>-<fase>/
+                     # CAPACITY=c1|c2: escada até o primeiro degrau não sustentado (ADR-0013)
+CAPACITY=c1 bench/day.sh  # dia de medição: todas as fases do cenário, cada uma com o seed recarregado
 make down            # make clean também apaga o volume do Postgres
 ```
 
