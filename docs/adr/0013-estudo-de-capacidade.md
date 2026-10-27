@@ -198,9 +198,18 @@ Resultado contrário a qualquer previsão entra no capítulo igual.
 - No PostgreSQL 18, o tempo de escrita e de fsync do WAL saiu do `pg_stat_wal` e foi para o `pg_stat_io`
   (`object = 'wal'`); o `track_wal_io_timing` controla esse tempo lá. A bancada lê os dois, a cada segundo
   (`pg-seconds.csv`).
-- "CPU das fases baixa", no limite do gerador (decisão 2), é: nenhum container da fase passou, em média, de metade do
-  seu limite de CPU no degrau. Os critérios ficam em `bench/Report.java` (`judge`), que a bancada usa para a regra de
-  parada.
+- "CPU das fases baixa", no limite do gerador (decisão 2), é: nenhum container da fase passou de metade do seu limite
+  de CPU em mais de 10% das amostras do degrau (o p90). A primeira versão usava a média. No ensaio de 27/10 (seed
+  0,01, fora do estudo), a réplica saturou por 15 s, o app das consultas morreu por falta de heap e a média ficou em
+  47%: uma saturação curta passaria por limite do gerador. Os critérios ficam em `bench/Report.java` (`judge`), que a
+  bancada usa para a regra de parada.
+- A vazão é a do Gatling: requisições divididas pelos segundos do relatório, contados inteiros. Um segundo a mais
+  custa 1/`DURATION`, ou seja 0,55% com 180 s, dentro da folga de 2%. Em degraus curtos de ensaio (30 s, 3,3%), o
+  critério de vazão não vale.
+- No ensaio, o gerador sustentou 620 requisições/s (90 s, a v1-replica com folga). A 1200/s, a fase caiu antes dele,
+  então o teto do gerador não foi medido. Acima do joelho, as threads virtuais aceitam requisições sem limite até o
+  heap acabar: a fase não perde vazão aos poucos, cai de uma vez. Isso não muda a capacidade medida, porque a escada
+  para no primeiro degrau não sustentado.
 - A fila no fim do degrau é medida logo depois do Gatling: na v3, o outbox mais o lag do consumer group (o lag leva
   alguns segundos para sair, a favor da v3); na v1-replica, o WAL ainda não aplicado dividido pelo WAL gerado por
   segundo no degrau. Entre repetições, a execução seguinte só começa com a fila vazia.

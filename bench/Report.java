@@ -39,10 +39,12 @@ static final double MAX_LAG_P99_S = 2;
 static final double MAX_QUEUE_S = 1;
 /**
  * Vazão abaixo da oferecida com as fases ociosas é limite do gerador, não da fase (ADR-0013, decisão 2). "Ociosa":
- * nenhum container da fase passou, em média, de metade do seu limite de CPU. É a leitura operacional do ADR, fixada
- * aqui antes da primeira medição.
+ * nenhum container da fase passou de metade do seu limite de CPU em mais de 10% das amostras (o p90). A média não
+ * serve: no ensaio de 27/10, a réplica saturou por 15 s e o app das consultas caiu, e a média ficou em 47%. É a leitura
+ * operacional do ADR, fixada aqui antes da primeira medição.
  */
 static final double GENERATOR_MAX_CPU_SHARE = 0.5;
+static final double GENERATOR_CPU_PERCENTILE = 0.9;
 /** Containers de observação, fora da conta de CPU da fase. */
 static final Pattern OBSERVERS = Pattern.compile("grafana|prometheus|exporter|tempo");
 /** Instruções que um comando executa: escritas e o lock da conta. */
@@ -615,7 +617,7 @@ Verdict judge(Path rep) throws IOException {
     } else {
         double cpu = phaseCpuShare(rep);
         boolean idle = cpu < GENERATOR_MAX_CPU_SHARE;
-        failures.add("vazão " + percent(throughput, 0) + " da oferecida (CPU da fase até " + percent(cpu, 0)
+        failures.add("vazão " + percent(throughput, 0) + " da oferecida (CPU da fase no p90 até " + percent(cpu, 0)
                 + " do limite)");
         state = failures.size() == 1 && idle ? State.GENERATOR : State.NOT_SUSTAINED;
     }
@@ -663,7 +665,10 @@ double[] eventualLag(Path rep, double writeRate) throws IOException {
     return new double[] {p99, walPerSecond > 0 ? endBytes / walPerSecond : Double.NaN};
 }
 
-/** Maior fração do limite de CPU usada em média por um container da fase (docker-stats.csv e containers.csv). */
+/**
+ * Maior fração do limite de CPU de um container da fase no p90 das amostras do degrau (docker-stats.csv e
+ * containers.csv).
+ */
 double phaseCpuShare(Path rep) throws IOException {
     var limits = new HashMap<String, Double>();
     var containers = rep.getParent().getParent().getParent().resolve("containers.csv");
@@ -675,7 +680,7 @@ double phaseCpuShare(Path rep) throws IOException {
         var cells = line.split(",");
         limits.put(cells[0], Double.parseDouble(cells[1]));
     }
-    var sums = new HashMap<String, double[]>();
+    var samples = new HashMap<String, List<Double>>();
     for (var line : Files.readAllLines(stats)) {
         var cells = line.split(",");
         if (cells.length < 3 || OBSERVERS.matcher(cells[1]).find() || !limits.containsKey(cells[1])) {
@@ -683,15 +688,15 @@ double phaseCpuShare(Path rep) throws IOException {
         }
         try {
             double cpu = Double.parseDouble(cells[2].replace("%", ""));
-            var sum = sums.computeIfAbsent(cells[1], _ -> new double[2]);
-            sum[0] += cpu;
-            sum[1]++;
+            samples.computeIfAbsent(cells[1], _ -> new ArrayList<>()).add(cpu / 100 / limits.get(cells[1]));
         } catch (NumberFormatException _) {
             // container saindo do ar no meio da amostra ("--")
         }
     }
-    return sums.entrySet().stream().mapToDouble(e -> e.getValue()[0] / e.getValue()[1] / 100 / limits.get(e.getKey()))
-            .max().orElse(Double.NaN);
+    return samples.values().stream().mapToDouble(shares -> {
+        var sorted = shares.stream().mapToDouble(Double::doubleValue).sorted().toArray();
+        return sorted[Math.max(0, (int) Math.ceil(sorted.length * GENERATOR_CPU_PERCENTILE) - 1)];
+    }).max().orElse(Double.NaN);
 }
 
 List<StepVerdict> steps(Path results) throws IOException {
@@ -792,7 +797,8 @@ void capacityRuns(Path runs, StringBuilder out) throws IOException {
 
             Critério do ADR-0013 por repetição: p95 dos comandos ≤ %s ms, p95 das consultas ≤ %s ms, KO ≤ %s%%,
             vazão ≥ %s da oferecida e, com consistência eventual, atraso p99 ≤ %s s e fila no fim ≤ %s s de escrita.
-            Vazão baixa com nenhum container da fase acima de %s do seu limite de CPU é limite do gerador. Degrau
+            Vazão baixa com nenhum container da fase acima de %s do seu limite de CPU (p90 das amostras) é limite do
+            gerador. Degrau
             sustentado: em pelo menos 2 de 3 repetições. **Maior degrau sustentado: %s.**
 
             """.formatted(fmt(COMMANDS_P95_MS, 0), fmt(QUERIES_P95_MS, 0), fmt(MAX_KO_PCT, 0),

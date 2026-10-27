@@ -80,7 +80,7 @@ if docker compose -f infra/compose.yaml --profile trace ps --format '{{.Service}
 fi
 seed_accounts=$(psql_ -c "SELECT count(*) FROM account WHERE holder_id LIKE 'seed-%'")
 [[ $seed_accounts -gt 0 ]] || { echo "dataset vazio: make seed SCALE=1" >&2; exit 1; }
-scale=$(awk -v n="$seed_accounts" 'BEGIN { printf "%g", n / 100000 }')
+scale=$(LC_ALL=C awk -v n="$seed_accounts" 'BEGIN { printf "%g", n / 100000 }')
 OUT=${OUT:-docs/benchmarks/$(date +%F)-${CAPACITY:+$CAPACITY-}$PHASE$([[ $scale == 1 ]] || echo "-scale$scale")}
 if [[ -e $OUT ]]; then
     echo "$OUT já existe; apague ou passe OUT=..." >&2

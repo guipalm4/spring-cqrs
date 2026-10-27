@@ -57,7 +57,10 @@ CAPACITY=c2 bench/day.sh   # escrita intensa com busca, em outro dia
 
 Cada fase sobe a escada até o primeiro degrau não sustentado (critério no `bench/Report.java`, `judge`); o `summary.md`
 de cada fase traz a seção "Capacidade", e `java bench/Report.java capacity docs/benchmarks/<dia>-c1-*` faz a tabela e
-o gráfico das fases do dia. Diagnóstico da cauda da v3 (S1 com e sem o projetor, intercalados):
+o gráfico das fases do dia. Para ensaiar a bancada sem tocar no dataset de referência, use um projeto à parte
+(`COMPOSE_PROJECT_NAME=spring-cqrs-ensaio`, `SCALE=0.01`, `REPS=1`) e degraus de pelo menos 90 s: o Gatling conta a
+vazão em segundos inteiros, e com 30 s um segundo a mais já reprova o degrau (ADR-0013, notas de implementação).
+Diagnóstico da cauda da v3 (S1 com e sem o projetor, intercalados):
 
 ```bash
 make up PHASE=v3 && make seed PHASE=v3 SCALE=1
