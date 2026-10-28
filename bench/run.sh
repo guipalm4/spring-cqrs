@@ -357,7 +357,14 @@ run() { # nome writeRate readRate rep
     # Acima do joelho, uma JVM pode ficar sem heap e não voltar (27/10): a URL vai para down.txt, o Report.java reprova
     # o degrau e a escada para, em vez de medir as repetições seguintes numa JVM morta.
     down_urls >> "$dir/down.txt"
-    [[ -s $dir/down.txt ]] || rm "$dir/down.txt"
+    if [[ -s $dir/down.txt ]]; then
+        # O day.sh apaga os containers entre as fases: sem isto, a causa da queda (o OutOfMemoryError) se perde.
+        for app in $apps; do
+            "${COMPOSE[@]}" logs --no-color --tail 300 "$app" > "$dir/logs-$app.txt" 2>&1 || true
+        done
+    else
+        rm "$dir/down.txt"
+    fi
     bench/timeseries.sh "$dir" "$start" "$end"
     if [[ -n $has_mongo ]]; then
         printf 'phase,pages_read,bytes_read,app_reads,app_read_us,bytes_written_from_cache,block_bytes_written\nbefore,%s\nafter,%s\n' \

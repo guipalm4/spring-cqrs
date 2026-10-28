@@ -753,12 +753,20 @@ String capacity(List<Path> phases) throws IOException {
     var labels = new ArrayList<String>();
     var values = new ArrayList<Double>();
     String unit = "?";
+    // Uma fase medida em mais de um dia (a v3 do C1 foi refeita junto da v3-s5) leva a data no nome, para as linhas
+    // não se confundirem.
+    var counts = phases.stream().map(results -> phaseName(results))
+            .collect(Collectors.groupingBy(name -> name, Collectors.counting()));
     for (var results : phases) {
         var steps = steps(results);
         if (steps.isEmpty()) {
             continue;
         }
-        var name = results.getFileName().toString().replaceFirst("^\\d{4}-\\d{2}-\\d{2}-(c[12]-)?", "");
+        var name = phaseName(results);
+        if (counts.get(name) > 1) {
+            var date = results.getFileName().toString().substring(0, 10).split("-");
+            name += " (" + date[2] + "/" + date[1] + ")";
+        }
         unit = steps.getFirst().name().startsWith("c2-") ? "comandos/s" : "consultas/s";
         double max = maxSustained(steps);
         var stop = steps.stream().filter(step -> step.state() != State.SUSTAINED).findFirst();
@@ -784,6 +792,10 @@ String capacity(List<Path> phases) throws IOException {
             |---|---:|---:|---|
             """.formatted(unit) + table + "\n" + mermaid("bar", "Maior degrau sustentado (" + unit + ")", labels, unit,
             values);
+}
+
+String phaseName(Path results) {
+    return results.getFileName().toString().replaceFirst("^\\d{4}-\\d{2}-\\d{2}-(c[12]-)?", "");
 }
 
 /** Seção do summary.md com o critério aplicado a cada repetição da escada. */
