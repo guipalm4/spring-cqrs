@@ -223,6 +223,20 @@ Resultado contrário a qualquer previsão entra no capítulo igual.
   alguns segundos para sair, a favor da v3); na v1-replica, o WAL ainda não aplicado dividido pelo WAL gerado por
   segundo no degrau. Entre repetições, a execução seguinte só começa com a fila vazia.
 
+### Nota antes do C2 (2026-10-28)
+
+No C1, o degrau de 600/s parou no disco virtual que os stores dividem, não na CPU: o custo de cada página lida pelo
+Mongo e o fsync médio do WAL subiram nas repetições que caíram
+([análise](../benchmarks/2026-10-27-c1/README.md)). No C2 o disco deve pesar mais, porque a carga é escrita. Escrito
+antes de medir, para a leitura não ser escolhida depois:
+
+- Os vereditos de P5–P7 saem só pela regra acima, sem exceção para o disco. Se a v3 parar pelos comandos no mesmo
+  degrau da v1, o CQRS fica refutado no C2, mesmo que a causa seja o disco.
+- Junto do veredito, a análise informa, para o último degrau sustentado e o primeiro não sustentado de cada fase, o
+  fsync médio do WAL (`pg-seconds.csv`), o custo por página lida do Mongo (`mongo-cache.csv`) e o atraso da réplica.
+  Se o fsync no degrau em que a fase para for pelo menos o dobro do degrau anterior, a parada é atribuída ao disco
+  compartilhado, como limite do host, e não muda o veredito.
+
 ## Alternativas consideradas
 
 - **Subir as taxas fixas até a v1 colapsar:** escolher o ponto de carga pelo resultado, o que o ADR-0009 recusou.

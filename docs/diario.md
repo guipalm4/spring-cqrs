@@ -80,3 +80,7 @@ Até o M3, esse caminho está nos capítulos 1 a 3 do README ("O que mudou no en
   escrita). Não deu nenhuma das duas: o Mongo ficou em 127% de 200% (p90). O que os dados mostram, lido depois, é o
   disco: cada página que o Mongo lê custa de 0,33 a 1,90 ms, e o fsync do WAL vai a 3,5 ms na v3-s5. A H7 fica sem
   veredito pela letra da regra. A v3-s5 ainda começou com o cache do Mongo mais frio que a v3.
+- Antes do C2: o C1 parou no disco, e o C2 é escrita. Para não escolher a leitura depois de ver os dados, ficou
+  escrito no [ADR-0013](adr/0013-estudo-de-capacidade.md) (nota antes do C2) que os vereditos saem só pela regra e que
+  o fsync do WAL e o custo por página do Mongo entram ao lado, com um limiar fixo (o dobro do degrau anterior) para
+  atribuir a parada ao disco.

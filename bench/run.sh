@@ -360,7 +360,7 @@ run() { # nome writeRate readRate rep
     if [[ -s $dir/down.txt ]]; then
         # O day.sh apaga os containers entre as fases: sem isto, a causa da queda (o OutOfMemoryError) se perde.
         for app in $apps; do
-            "${COMPOSE[@]}" logs --no-color --tail 300 "$app" > "$dir/logs-$app.txt" 2>&1 || true
+            "${COMPOSE[@]}" logs --no-color --tail 2000 "$app" > "$dir/logs-$app.txt" 2>&1 || true
         done
     else
         rm "$dir/down.txt"
