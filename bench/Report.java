@@ -762,14 +762,19 @@ String capacity(List<Path> phases) throws IOException {
         unit = steps.getFirst().name().startsWith("c2-") ? "comandos/s" : "consultas/s";
         double max = maxSustained(steps);
         var stop = steps.stream().filter(step -> step.state() != State.SUSTAINED).findFirst();
+        // A v3-s5 do C1 começa no degrau em que a v3 parou: sem degrau sustentado, ela não tem barra no gráfico (um
+        // zero diria que os degraus de baixo foram reprovados, e eles não rodaram).
         table.append("| ").append(name)
-                .append(" | ").append(Double.isNaN(max) ? "nenhum" : fmt(max, 0))
+                .append(" | ").append(Double.isNaN(max) ? "nenhum a partir de " + fmt(steps.getFirst().rate(), 0)
+                        : fmt(max, 0))
                 .append(" | ").append(stop.map(step -> fmt(step.rate(), 0)).orElse("— (sustentou todos)"))
                 .append(" | ").append(stop.map(step -> (step.state() == State.GENERATOR ? "gerador: " : "")
                         + step.causes()).orElse("—"))
                 .append(" |\n");
-        labels.add(name);
-        values.add(Double.isNaN(max) ? 0 : max);
+        if (!Double.isNaN(max)) {
+            labels.add(name);
+            values.add(max);
+        }
     }
     return """
             Maior degrau sustentado em pelo menos 2 de 3 repetições (ADR-0013), em %s. Gerado por

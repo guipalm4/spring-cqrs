@@ -1,0 +1,35 @@
+calls,total_ms,mean_ms,stddev_ms,rows,shared_blks_hit,shared_blks_read,read_ms,query
+4125,803,0.19,3.74,4125,63457,0,0,"INSERT INTO ledger_entry (transaction_id, account_id, kind, amount, balance_after, category_id, description, counterparty_name, counterparty_account_id, occurred_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, now()) RETURNING id, transaction_id, account_id, amount, balance_after, occurred_at"
+3600,695,0.19,6.36,3600,29288,0,0,"INSERT INTO idempotency_record (idempotency_key, request_hash) VALUES ($1, $2) ON CONFLICT (idempotency_key) DO NOTHING"
+6818,490,0.07,0.97,6818,27356,0,0,"SELECT id, holder_id, holder_name, currency, balance, overdraft_limit FROM account WHERE id = $1"
+4125,255,0.06,0.47,4125,20687,0,0,"SELECT id, holder_id, holder_name, currency, balance, overdraft_limit FROM account WHERE id = $1 FOR UPDATE"
+4125,232,0.06,0.24,4125,56761,0,0,UPDATE EVENT_PUBLICATION SET STATUS = $2 WHERE ID = $1 AND STATUS != $3
+4125,170,0.04,0.12,4125,29573,0,0,UPDATE account SET balance = $1 WHERE id = $2
+4125,166,0.04,0.09,4125,38839,0,0,DELETE FROM EVENT_PUBLICATION WHERE ID = $1
+4125,147,0.04,0.14,4125,27843,0,0,"INSERT INTO EVENT_PUBLICATION (ID, EVENT_TYPE, LISTENER_ID, PUBLICATION_DATE, SERIALIZED_EVENT, STATUS, COMPLETION_ATTEMPTS, LAST_RESUBMISSION_DATE) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)"
+3600,140,0.04,0.16,3600,23062,0,0,UPDATE idempotency_record SET response = CAST($1 AS jsonb) WHERE idempotency_key = $2
+2298,130,0.06,0.17,2298,11490,0,0,SELECT EXISTS (SELECT 1 FROM account WHERE id = $1)
+172,122,0.71,0.43,172,344,0,0,SELECT pg_database_size($1)
+180,111,0.61,0.32,180,0,0,0,"SELECT extract($1 FROM clock_timestamp())::bigint, (SELECT sum(writes) FROM pg_stat_io WHERE object = $2), (SELECT round(sum(write_time)::numeric, $3) FROM pg_stat_io WHERE object = $4), (SELECT sum(fsyncs) FROM pg_stat_io WHERE object = $5), (SELECT round(sum(fsync_time)::numeric, $6) FROM pg_stat_io WHERE object = $7), (SELECT wal_bytes FROM pg_stat_wal), (SELECT round(max(extract($8 FROM replay"
+43,65,1.51,0.99,387,22231,0,0,"SELECT current_database() datname, schemaname, relname, seq_scan, seq_tup_read, idx_scan, idx_tup_fetch, n_tup_ins, n_tup_upd, n_tup_del, n_tup_hot_upd, n_live_tup, n_dead_tup, n_mod_since_analyze, COALESCE(last_vacuum, $1) as last_vacuum, COALESCE(last_autovacuum, $2) as last_autovacuum, COALESCE(last_analyze, $3) as last_analyze, COALESCE(last_autoanalyze, $4) as last_autoanalyze, vacuum_count, "
+3600,57,0.02,0.03,3600,7200,0,0,SELECT id FROM category WHERE code = $1
+43,36,0.85,0.13,12384,0,0,0,"SELECT name, setting, COALESCE(unit, $1), COALESCE(short_desc, $2), vartype FROM pg_settings WHERE vartype IN ($3 /*, ... */) AND name NOT IN ($4 /*, ... */)"
+43,18,0.42,0.45,1548,172,0,0,"SELECT pg_database.datname as datname, tmp.mode as mode, COALESCE(count, $1) as count FROM ( VALUES ($2), ($3), ($4), ($5), ($6), ($7), ($8), ($9), ($10) ) AS tmp(mode) CROSS JOIN pg_database LEFT JOIN ( SELECT database, lower(mode) AS mode, count(*) AS count FROM pg_locks WHERE database IS NOT NULL GROUP BY database, lower(mode) ) AS tmp2 ON tmp.mode = tmp2.mode and pg_database.oid = tmp2.databas"
+43,18,0.41,0.28,43,0,0,0,"SELECT COUNT(*) AS segments, SUM(size) AS size FROM pg_ls_waldir() WHERE name ~ $1"
+43,15,0.36,0.71,387,2666,0,0,"SELECT current_database() datname, schemaname, relname, heap_blks_read, heap_blks_hit, idx_blks_read, idx_blks_hit, toast_blks_read, toast_blks_hit, tidx_blks_read, tidx_blks_hit FROM pg_statio_user_tables"
+43,11,0.24,0.16,1078,129,0,0,"SELECT pg_database.datname, tmp.state, tmp2.usename, tmp2.application_name, tmp2.backend_type, tmp2.wait_event_type, tmp2.wait_event, COALESCE(count,$1) as count, COALESCE(max_tx_duration,$2) as max_tx_duration FROM ( VALUES ($3), ($4), ($5), ($6), ($7), ($8) ) AS tmp(state) CROSS JOIN pg_database LEFT JOIN ( SELECT datname, state, usename, application_name, backend_type, wait_event_type, wait_eve"
+11850,10,0.00,0.01,0,0,0,0,BEGIN
+43,5,0.11,0.06,0,0,0,0,"SELECT application_name, client_addr::text, state, s.slot_name, (case pg_is_in_recovery() when $1 then pg_wal_lsn_diff(pg_last_wal_receive_lsn(), pg_lsn($2))::float else pg_wal_lsn_diff(pg_current_wal_lsn(), pg_lsn($3))::float end) AS pg_current_wal_lsn_bytes, (case pg_is_in_recovery() when $4 then pg_wal_lsn_diff(pg_last_wal_receive_lsn(), replay_lsn)::float else pg_wal_lsn_diff(pg_current_wal_ls"
+43,3,0.07,0.09,172,43,0,0,SELECT * FROM pg_stat_database_conflicts
+43,2,0.06,0.04,215,43,0,0,"SELECT datid,datname,numbackends,xact_commit,xact_rollback,blks_read,blks_hit,tup_returned,tup_fetched,tup_inserted,tup_updated,tup_deleted,conflicts,temp_files,temp_bytes,deadlocks,blk_read_time,blk_write_time,stats_reset,active_time FROM pg_stat_database"
+47,2,0.05,0.03,47,472,0,0,SELECT count(*) FROM event_publication
+43,1,0.03,0.02,0,0,0,0,"SELECT d.datname, COALESCE( CASE WHEN d.datname = current_database() THEN s.relid::regclass::text END, s.relid::text ) AS relname, s.param1 AS phase, s.param2 AS heap_blks_total, s.param3 AS heap_blks_scanned, s.param4 AS heap_blks_vacuumed, s.param5 AS index_vacuum_count, s.param6 AS max_dead_tuples, s.param7 AS num_dead_tuples FROM pg_stat_get_progress_info($1::text) s(pid, datid, relid, param1,"
+86,1,0.01,0.02,86,0,0,0,SELECT version()
+43,1,0.01,0.01,43,0,0,0,"SELECT archived_count, failed_count, extract($1 from now() - last_archived_time) AS last_archive_age FROM pg_stat_archiver"
+43,1,0.01,0.01,0,0,0,0,"SELECT slot_name, database, active, (case pg_is_in_recovery() when $1 then pg_wal_lsn_diff(pg_last_wal_receive_lsn(), restart_lsn) else pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn) end) as pg_wal_lsn_diff FROM pg_replication_slots"
+43,0,0.01,0.01,43,0,0,0,"SELECT buffers_clean ,maxwritten_clean ,buffers_alloc ,stats_reset FROM pg_stat_bgwriter"
+43,0,0.01,0.01,43,0,0,0,"SELECT CASE WHEN NOT pg_is_in_recovery() THEN $1 WHEN pg_last_wal_receive_lsn () = pg_last_wal_replay_lsn () THEN $2 ELSE GREATEST ($3, EXTRACT($4 FROM (now() - pg_last_xact_replay_timestamp()))) END AS lag, CASE WHEN pg_is_in_recovery() THEN $5 ELSE $6 END as is_replica, GREATEST ($7, EXTRACT($8 FROM (now() - pg_last_xact_replay_timestamp()))) as last_replay"
+43,0,0.01,0.00,731,43,0,0,"SELECT pg_roles.rolname, pg_roles.rolconnlimit FROM pg_roles"
+43,0,0.01,0.00,172,43,0,0,"SELECT pg_database.datname, pg_database.datconnlimit FROM pg_database"
+43,0,0.01,0.00,0,0,0,0,"SELECT slot_name, slot_type, CASE WHEN pg_is_in_recovery() THEN pg_last_wal_receive_lsn() - $1 ELSE pg_current_wal_lsn() - $2 END AS current_wal_lsn, COALESCE(confirmed_flush_lsn, $3) - $4 AS confirmed_flush_lsn, active, safe_wal_size, wal_status FROM pg_replication_slots"
+5,0,0.03,0.01,0,0,0,0,SET application_name = $1

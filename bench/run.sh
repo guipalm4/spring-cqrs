@@ -305,6 +305,19 @@ prometheus_by_instance() { # nome expressão-agrupada-por-instância -> "nome_<i
         | jq -r --arg name "$1" '.data.result[] | "\($name)_\(.metric.instance | sub(":8080$"; "")),\(.value[1])"'
 }
 
+down_urls() { # as URLs da fase que não responderam ao health em 60 s, uma por linha
+    local url
+    # Na v1 e na v2, comandos e consultas são o mesmo app: cada URL é conferida uma vez.
+    for url in $(printf '%s\n' "$COMMANDS_URL" ${QUERIES_URLS//,/ } | sort -u); do
+        for _ in $(seq 12); do
+            curl -fsS --max-time 5 "$url/actuator/health" > /dev/null 2>&1 && continue 2
+            sleep 5
+        done
+        log "$url não respondeu em 60 s" >&2
+        echo "$url"
+    done
+}
+
 run() { # nome writeRate readRate rep
     local name=$1 write=$2 read=$3 rep=$4
     local dir=$OUT/runs/$name/r$rep
@@ -341,17 +354,10 @@ run() { # nome writeRate readRate rep
     if [[ -n $has_mongo ]]; then
         printf 'metric,value\noutbox_end,%s\nkafka_lag_end,%s\n' "$(outbox_count)" "$(kafka_lag)" > "$dir/queue.csv"
     fi
-    # Acima do joelho, uma JVM pode ficar sem heap e não voltar (27/10): sem resposta em 60 s, a URL vai para down.txt,
-    # o Report.java reprova o degrau e a escada para, em vez de medir as repetições seguintes numa JVM morta.
-    local url
-    for url in "$COMMANDS_URL" ${QUERIES_URLS//,/ }; do
-        for _ in $(seq 12); do
-            curl -fsS --max-time 5 "$url/actuator/health" > /dev/null 2>&1 && continue 2
-            sleep 5
-        done
-        log "$url não respondeu em 60 s depois da execução"
-        echo "$url" >> "$dir/down.txt"
-    done
+    # Acima do joelho, uma JVM pode ficar sem heap e não voltar (27/10): a URL vai para down.txt, o Report.java reprova
+    # o degrau e a escada para, em vez de medir as repetições seguintes numa JVM morta.
+    down_urls >> "$dir/down.txt"
+    [[ -s $dir/down.txt ]] || rm "$dir/down.txt"
     bench/timeseries.sh "$dir" "$start" "$end"
     if [[ -n $has_mongo ]]; then
         printf 'phase,pages_read,bytes_read,app_reads,app_read_us,bytes_written_from_cache,block_bytes_written\nbefore,%s\nafter,%s\n' \
@@ -443,12 +449,13 @@ else
     else
         steps=$WRITE_RATES
     fi
-    first=${steps%% *}
-    log "aquecimento descartado: ${WARMUP}s no primeiro degrau ($CAPACITY, $first/s)"
-    if [[ $CAPACITY == c1 ]]; then
-        gatling "$WRITE_RATE" "$first" "$WARMUP" 1 > bench/target/warmup.log 2>&1 || { tail -40 bench/target/warmup.log >&2; exit 1; }
-    else
-        gatling "$first" "$READ_RATE" "$WARMUP" 1 > bench/target/warmup.log 2>&1 || { tail -40 bench/target/warmup.log >&2; exit 1; }
+    # O aquecimento é sempre no degrau base do cenário (75 consultas/s no C1, 20 comandos/s no C2), mesmo quando a
+    # escada começa mais alto: a v3-s5 do C1 começa onde a v3 parou, e aquecer lá matou as JVMs frias (27/10).
+    log "aquecimento descartado: ${WARMUP}s no degrau base ($CAPACITY: escrita $WRITE_RATE/s, leitura $READ_RATE/s)"
+    gatling "$WRITE_RATE" "$READ_RATE" "$WARMUP" 1 > bench/target/warmup.log 2>&1 || { tail -40 bench/target/warmup.log >&2; exit 1; }
+    if [[ -n $(down_urls) ]]; then
+        echo "a fase saiu do ar no aquecimento" >&2
+        exit 1
     fi
     drain
 

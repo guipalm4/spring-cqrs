@@ -214,6 +214,11 @@ Resultado contrário a qualquer previsão entra no capítulo igual.
   noite de 27/10: no primeiro C1, a v1 ficou sem heap na r1 do degrau de 600/s e não voltou. A r2 deu 100% de KO, e a
   bancada abortou o dia (série por segundo vazia). O dia foi refeito do zero com a regra. A regra vale para todas as
   fases e não muda o veredito daquele degrau, que já reprovava pelos critérios de latência e KO.
+- O aquecimento é sempre no degrau base do cenário (escrita a 20/s e leitura a 75/s), mesmo quando a escada começa
+  mais alto. No C1 de 27/10, a v3-s5 aqueceu a 600/s, onde começava, com as JVMs e o cache frios. As duas query-apis
+  chegaram ao degrau já no limite de memória e a 100% de CPU, sem atender. O resultado foi descartado (fica em
+  `bench/target`), e a v3 e a v3-s5 foram refeitas juntas em 28/10. A H7 compara as duas no mesmo dia; a v3 de 27/10
+  continua na comparação com as outras fases.
 - A fila no fim do degrau é medida logo depois do Gatling: na v3, o outbox mais o lag do consumer group (o lag leva
   alguns segundos para sair, a favor da v3); na v1-replica, o WAL ainda não aplicado dividido pelo WAL gerado por
   segundo no degrau. Entre repetições, a execução seguinte só começa com a fila vazia.
