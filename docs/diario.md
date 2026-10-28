@@ -61,3 +61,22 @@ Até o M3, esse caminho está nos capítulos 1 a 3 do README ("O que mudou no en
   extrair uma série vazia. Eu tinha escrito, horas antes, que a queda "não muda a capacidade medida", sem tratar uma
   fase que não volta. Correção: uma repetição com a fase fora do ar reprova o degrau e encerra a escada (nota no
   ADR-0013). O dia foi refeito do zero; o parcial ficou em `bench/target`, fora do Git.
+
+## 2026-10-28 — C1: a réplica piora a leitura num host só, e a escada não separa as outras
+
+- Resultado do C1 ([análise](benchmarks/2026-10-27-c1/README.md)): v1, v1-big, v2 e v3 sustentam 300 consultas/s; a
+  v1-replica, 150. Esperávamos a v1-replica perto da v1-big (P2 admitia um degrau abaixo, e foi o que deu). Não
+  esperávamos que ela perdesse também para a v1: no mesmo disco virtual, cada bloco lido custa 2 a 3 vezes mais.
+- H3 confirmada pela regra do ADR: a 600/s, os comandos da v3 ficam sem erro, e os da v1 e da v1-big têm 94% e 83% de
+  KO. P1 (a v1-big sustenta um degrau a mais) e P3 (a v2 sustenta um degrau acima da v1) refutadas.
+- O que a régua não mostra: com degraus que dobram, quatro fases empatam em 300. A margem a 300/s separa (a v2 com p95
+  de 19 ms nas consultas; a v1-big com 59 ms, pior que a v1 com o dobro do hardware), mas não tem critério escrito
+  antes. A H8 ficou inconclusiva no degrau que decide: a regra de parada acopla comandos e consultas.
+- Erros no meio: a v3-s5 aqueceu a 600/s com as JVMs frias e chegou morta ao primeiro degrau. O resultado foi
+  descartado, e a v3 e a v3-s5 foram refeitas juntas. Nenhuma fase degrada aos poucos: a JVM das consultas sai do ar
+  com a memória no limite. Os logs se perderam, porque o `day.sh` apaga os containers.
+- H7 (v3 e v3-s5 refeitas em 28/10): a v3 repete 300, e a v3-s5 não sustenta 600, com os comandos caindo junto (p95 de
+  7 s). Esperávamos uma de duas: a segunda query-api sustentar o degrau, ou o Mongo no teto de CPU (a refutação
+  escrita). Não deu nenhuma das duas: o Mongo ficou em 127% de 200% (p90). O que os dados mostram, lido depois, é o
+  disco: cada página que o Mongo lê custa de 0,33 a 1,90 ms, e o fsync do WAL vai a 3,5 ms na v3-s5. A H7 fica sem
+  veredito pela letra da regra. A v3-s5 ainda começou com o cache do Mongo mais frio que a v3.
