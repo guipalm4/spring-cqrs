@@ -56,3 +56,8 @@ Até o M3, esse caminho está nos capítulos 1 a 3 do README ("O que mudou no en
   projetor parado, os picos acima de 60 ms caem de 28 para 2 em três pares intercalados, e o p99 vai de 41–143 para
   14–19 ms. Nos segundos com pico, o fsync do WAL leva 4 a 5 vezes mais. A hipótese de 22/10 passa de "não confirmada"
   para confirmada. Ainda não separado: se o comando espera o próprio fsync ou o lock da conta de quem está no fsync.
+- O primeiro dia C1 (23h) abortou na v1, no degrau de 600/s. Até ali, 75, 150 e 300/s foram sustentados nas três
+  repetições. Na r1 do degrau de 600/s, a JVM ficou sem heap e não voltou; a r2 deu 100% de KO e a bancada quebrou ao
+  extrair uma série vazia. Eu tinha escrito, horas antes, que a queda "não muda a capacidade medida", sem tratar uma
+  fase que não volta. Correção: uma repetição com a fase fora do ar reprova o degrau e encerra a escada (nota no
+  ADR-0013). O dia foi refeito do zero; o parcial ficou em `bench/target`, fora do Git.

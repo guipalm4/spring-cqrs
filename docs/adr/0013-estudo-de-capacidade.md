@@ -208,8 +208,12 @@ Resultado contrário a qualquer previsão entra no capítulo igual.
   critério de vazão não vale.
 - No ensaio, o gerador sustentou 620 requisições/s (90 s, a v1-replica com folga). A 1200/s, a fase caiu antes dele,
   então o teto do gerador não foi medido. Acima do joelho, as threads virtuais aceitam requisições sem limite até o
-  heap acabar: a fase não perde vazão aos poucos, cai de uma vez. Isso não muda a capacidade medida, porque a escada
-  para no primeiro degrau não sustentado.
+  heap acabar: a fase não perde vazão aos poucos, cai de uma vez. A escada para no primeiro degrau não sustentado.
+- Uma repetição que termina com uma JVM da fase sem responder ao health por 60 s grava `down.txt`. O degrau fica
+  reprovado, mesmo que as outras repetições passem, e as repetições seguintes não rodam. A regra foi acrescentada na
+  noite de 27/10: no primeiro C1, a v1 ficou sem heap na r1 do degrau de 600/s e não voltou. A r2 deu 100% de KO, e a
+  bancada abortou o dia (série por segundo vazia). O dia foi refeito do zero com a regra. A regra vale para todas as
+  fases e não muda o veredito daquele degrau, que já reprovava pelos critérios de latência e KO.
 - A fila no fim do degrau é medida logo depois do Gatling: na v3, o outbox mais o lag do consumer group (o lag leva
   alguns segundos para sair, a favor da v3); na v1-replica, o WAL ainda não aplicado dividido pelo WAL gerado por
   segundo no degrau. Entre repetições, a execução seguinte só começa com a fila vazia.

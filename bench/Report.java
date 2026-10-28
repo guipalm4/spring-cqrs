@@ -45,6 +45,11 @@ static final double MAX_QUEUE_S = 1;
  */
 static final double GENERATOR_MAX_CPU_SHARE = 0.5;
 static final double GENERATOR_CPU_PERCENTILE = 0.9;
+/**
+ * Falha de uma repetição que terminou com uma JVM da fase fora do ar (down.txt, gravado pelo run.sh). O degrau não é
+ * sustentado, mesmo que as outras repetições passem: a fase não volta sozinha (ensaio e C1 de 27/10, falta de heap).
+ */
+static final String PHASE_DOWN = "fase fora do ar no fim";
 /** Containers de observação, fora da conta de CPU da fase. */
 static final Pattern OBSERVERS = Pattern.compile("grafana|prometheus|exporter|tempo");
 /** Instruções que um comando executa: escritas e o lock da conta. */
@@ -123,7 +128,8 @@ void seconds(Path html, Path csv) throws IOException {
     var lines = new ArrayList<String>();
     lines.add("epoch_s,t_s," + String.join(",", PERCENTILES.stream()
             .map(name -> name.equals("min") || name.equals("max") ? name : "p" + name.replace("%", "")).toList()));
-    long start = series.getFirst().getFirst()[0];
+    // Sem nenhuma requisição OK (a fase caiu), o Gatling não desenha a série: o CSV fica só com o cabeçalho.
+    long start = series.getFirst().isEmpty() ? 0 : series.getFirst().getFirst()[0];
     for (int i = 0; i < series.getFirst().size(); i++) {
         var line = new StringBuilder().append(series.getFirst().get(i)[0] / 1000).append(',')
                 .append((series.getFirst().get(i)[0] - start) / 1000);
@@ -528,6 +534,9 @@ record StepVerdict(String name, double rate, List<Verdict> reps) {
     }
 
     State state() {
+        if (reps.stream().anyMatch(v -> v.failures().stream().anyMatch(f -> f.startsWith(PHASE_DOWN)))) {
+            return State.NOT_SUSTAINED;
+        }
         if (count(State.SUSTAINED) >= needed()) {
             return State.SUSTAINED;
         }
@@ -596,6 +605,9 @@ Verdict judge(Path rep) throws IOException {
     double[] lag = eventualLag(rep, write);
 
     var failures = new ArrayList<String>();
+    if (Files.exists(rep.resolve("down.txt"))) {
+        failures.add(PHASE_DOWN + " (" + String.join(", ", Files.readAllLines(rep.resolve("down.txt"))) + ")");
+    }
     if (commandsP95 > COMMANDS_P95_MS) {
         failures.add("comandos p95 " + fmt(commandsP95, 0) + " ms");
     }

@@ -341,6 +341,17 @@ run() { # nome writeRate readRate rep
     if [[ -n $has_mongo ]]; then
         printf 'metric,value\noutbox_end,%s\nkafka_lag_end,%s\n' "$(outbox_count)" "$(kafka_lag)" > "$dir/queue.csv"
     fi
+    # Acima do joelho, uma JVM pode ficar sem heap e não voltar (27/10): sem resposta em 60 s, a URL vai para down.txt,
+    # o Report.java reprova o degrau e a escada para, em vez de medir as repetições seguintes numa JVM morta.
+    local url
+    for url in "$COMMANDS_URL" ${QUERIES_URLS//,/ }; do
+        for _ in $(seq 12); do
+            curl -fsS --max-time 5 "$url/actuator/health" > /dev/null 2>&1 && continue 2
+            sleep 5
+        done
+        log "$url não respondeu em 60 s depois da execução"
+        echo "$url" >> "$dir/down.txt"
+    done
     bench/timeseries.sh "$dir" "$start" "$end"
     if [[ -n $has_mongo ]]; then
         printf 'phase,pages_read,bytes_read,app_reads,app_read_us,bytes_written_from_cache,block_bytes_written\nbefore,%s\nafter,%s\n' \
@@ -443,12 +454,15 @@ else
 
     for rate in $steps; do
         if [[ $CAPACITY == c1 ]]; then
-            name=c1-r$(printf '%04d' "$rate")
-            for rep in $(seq 1 "$REPS"); do run "$name" "$WRITE_RATE" "$rate" "$rep"; done
+            name=c1-r$(printf '%04d' "$rate") write=$WRITE_RATE read=$rate
         else
-            name=c2-w$(printf '%04d' "$rate")
-            for rep in $(seq 1 "$REPS"); do run "$name" "$rate" "$READ_RATE" "$rep"; done
+            name=c2-w$(printf '%04d' "$rate") write=$rate read=$READ_RATE
         fi
+        for rep in $(seq 1 "$REPS"); do
+            run "$name" "$write" "$read" "$rep"
+            # Fase fora do ar: as repetições seguintes não medem nada, e o degrau já está reprovado.
+            [[ ! -e $OUT/runs/$name/r$rep/down.txt ]] || break
+        done
         if ! step_verdict "$OUT/runs/$name"; then
             log "escada encerrada em $name"
             break
