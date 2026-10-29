@@ -332,9 +332,12 @@ run() { # nome writeRate readRate rep
     sleep "$PAUSE"
     echo "| $name r$rep | início $(host_load)" >> "$OUT/env.md"
 
+    # Sob carga, o docker stats pode falhar uma amostra ("timeout waiting for stats", v1-big a 400/s em 28/10): a
+    # amostra se perde e o laço continua. Antes, o set -e matava o laço, o kill abaixo falhava e o run.sh saía com o
+    # amostrador do Postgres vivo, segurando o tee do day.sh: o dia ficou parado 10 h.
     (while true; do
         docker stats --no-stream --format "{{.Name}},{{.CPUPerc}},{{.MemUsage}},{{.BlockIO}}" $("${COMPOSE[@]}" ps -q) \
-            | sed "s/^/$(date +%s),/"
+            | sed "s/^/$(date +%s),/" || true
     done) > "$dir/docker-stats.csv" &
     local sampler=$! start mongo_before=""
     pg_sampler_start "$dir/pg-seconds.csv"
@@ -344,8 +347,8 @@ run() { # nome writeRate readRate rep
     # Semente por repetição: cada repetição sorteia outras contas, e a mesma repetição sorteia as mesmas
     # contas em todas as fases.
     gatling "$write" "$read" "$DURATION" $((100 + rep)) > "$dir/gatling.log" 2>&1 || {
-        kill "$sampler"; pg_sampler_stop; tail -40 "$dir/gatling.log" >&2; exit 1; }
-    kill "$sampler"; wait "$sampler" 2> /dev/null || true
+        kill "$sampler" 2> /dev/null || true; pg_sampler_stop; tail -40 "$dir/gatling.log" >&2; exit 1; }
+    kill "$sampler" 2> /dev/null || true; wait "$sampler" 2> /dev/null || true
     pg_sampler_stop
     local end
     end=$(date +%s)
