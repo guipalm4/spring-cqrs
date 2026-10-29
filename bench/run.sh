@@ -67,6 +67,19 @@ psql_() { "${COMPOSE[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U ledger -d 
 replica_psql() { "${COMPOSE[@]}" exec -T postgres-replica psql -v ON_ERROR_STOP=1 -U ledger -d ledger -qAt "$@"; }
 log() { printf '\n[bench %s] %s\n' "$(date +%T)" "$*"; }
 
+# Coleta auxiliar (série temporal, pg_stat_statements, Prometheus, EXPLAIN): uma falha vira aviso no log e em
+# warnings.txt, sem derrubar a noite. Só o que invalida o dado é fatal: o Gatling, o relatório dele e o veredito.
+# Em 28 e 29/10, dois defeitos em passos assim pararam o C2 inteiro.
+optional() { # descrição comando...
+    local what=$1
+    shift
+    "$@" || {
+        local status=$?
+        log "aviso: $what falhou (status $status)" >&2
+        echo "$what (status $status)" >> "${dir:-$OUT}/warnings.txt"
+    }
+}
+
 # --- Pré-condições ---------------------------------------------------------------------------------------------
 for url in "$COMMANDS_URL" ${QUERIES_URLS//,/ }; do
     curl -fsS "$url/actuator/health" > /dev/null || { echo "$url fora do ar: make up PHASE=$PHASE" >&2; exit 1; }
@@ -127,11 +140,20 @@ drain() { # espera a fila esvaziar, para uma execução não herdar o atraso da 
 }
 
 # --- Grafana fora da medição (ADR-0013): a 512 MB, ele já fez GBs de I/O no disco compartilhado da VM -------------
-if "${COMPOSE[@]}" ps --format '{{.Service}}' | grep -qx grafana; then
+grafana_stopped=""
+if "${COMPOSE[@]}" ps --format '{{.Service}}' | grep -x grafana > /dev/null; then
     log "parando o Grafana até o fim da medição"
     "${COMPOSE[@]}" stop grafana > /dev/null
-    trap '"${COMPOSE[@]}" start grafana > /dev/null 2>&1 || true' EXIT
+    grafana_stopped=1
 fi
+
+# Em qualquer saída: um amostrador do Postgres vivo segura o tee do day.sh, e o dia fica parado (28/10).
+pg_sampler=""
+cleanup() {
+    [[ -z $pg_sampler ]] || pg_sampler_stop
+    [[ -z $grafana_stopped ]] || "${COMPOSE[@]}" start grafana > /dev/null 2>&1 || true
+}
+trap cleanup EXIT
 
 if [[ -n $has_replica ]]; then
     log "esperando a réplica aplicar o WAL do seed"
@@ -275,6 +297,7 @@ pg_sampler_start() { # arquivo
 pg_sampler_stop() {
     "${COMPOSE[@]}" exec -T postgres sh -c 'kill "$(cat /tmp/pg-sampler.pid)"' 2> /dev/null || true
     wait "$pg_sampler" 2> /dev/null || true
+    pg_sampler=""
 }
 
 statements() { # psql (psql_ ou replica_psql) -> CSV das instruções da execução
@@ -368,7 +391,7 @@ run() { # nome writeRate readRate rep
     else
         rm "$dir/down.txt"
     fi
-    bench/timeseries.sh "$dir" "$start" "$end"
+    optional timeseries.csv bench/timeseries.sh "$dir" "$start" "$end"
     if [[ -n $has_mongo ]]; then
         printf 'phase,pages_read,bytes_read,app_reads,app_read_us,bytes_written_from_cache,block_bytes_written\nbefore,%s\nafter,%s\n' \
             "$mongo_before" "$(mongo_cache)" > "$dir/mongo-cache.csv"
@@ -383,10 +406,18 @@ run() { # nome writeRate readRate rep
     java bench/Report.java extract "$report" "$dir/stats.csv"
     java bench/Report.java seconds "$report" "$dir/seconds.csv"
 
-    statements psql_ > "$dir/pg_stat_statements.csv"
+    optional pg_stat_statements.csv statements psql_ > "$dir/pg_stat_statements.csv"
     # Na v1-replica, as consultas rodam na réplica, que tem as próprias estatísticas.
-    [[ -z $has_replica ]] || statements replica_psql > "$dir/pg_stat_statements-replica.csv"
+    if [[ -n $has_replica ]]; then
+        optional pg_stat_statements-replica.csv statements replica_psql > "$dir/pg_stat_statements-replica.csv"
+    fi
+    optional prometheus.csv prometheus_csv > "$dir/prometheus.csv"
 
+    [[ $name != s1-sem-projetor ]] || "${COMPOSE[@]}" up -d --wait projector > /dev/null
+    drain
+}
+
+prometheus_csv() { # métricas da execução que acabou de rodar, agregadas sobre a duração dela
     local window="${DURATION}s"
     {
         echo "metric,value"
@@ -418,16 +449,19 @@ run() { # nome writeRate readRate rep
         echo "projection_applied,$(prometheus "sum(increase(ledger_projection_lag_seconds_count[$window]))")"
         echo "projection_duplicates,$(prometheus "sum(increase(ledger_projection_duplicates_total[$window]))")"
         echo "outbox_backlog_max,$(prometheus "max(max_over_time(ledger_outbox_backlog[$window]))")"
-    } > "$dir/prometheus.csv"
-
-    [[ $name != s1-sem-projetor ]] || "${COMPOSE[@]}" up -d --wait projector > /dev/null
-    drain
+    }
 }
 
 # Degrau da escada (ADR-0013): 0 sustentado, 1 não sustentado, 2 limitado pelo gerador; o veredito vai para o log.
 step_verdict() {
-    local status=0
-    java bench/Report.java step "$1" || status=$?
+    local status=0 verdict
+    verdict=$(java bench/Report.java step "$1") || status=$?
+    echo "$verdict"
+    # Uma exceção no Report.java também sai com 1: sem a linha do veredito, é defeito da bancada, não degrau reprovado.
+    if [[ $verdict != *sustentado* && $verdict != *gerador* ]]; then
+        echo "o Report.java não deu veredito para $1 (status $status)" >&2
+        exit 1
+    fi
     return "$status"
 }
 
@@ -495,7 +529,6 @@ java bench/Report.java summarize "$OUT"
 # Planos das consultas da fase, com o cache no estado em que a carga o deixou (ADR-0005, regra 5).
 if [[ -f bench/explain/$PHASE.sql ]]; then
     log "EXPLAIN ANALYZE ($PHASE)"
-    "${COMPOSE[@]}" exec -T postgres psql -v ON_ERROR_STOP=1 -U ledger -d ledger -qAt \
-        < "bench/explain/$PHASE.sql" > "$OUT/explain.md"
+    optional explain.md psql_ < "bench/explain/$PHASE.sql" > "$OUT/explain.md"
 fi
 log "pronto: $OUT/summary.md"

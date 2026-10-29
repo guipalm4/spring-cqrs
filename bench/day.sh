@@ -25,8 +25,11 @@ case $CAPACITY in
     *) echo "CAPACITY=$CAPACITY: use c1 ou c2" >&2; exit 1 ;;
 esac
 PHASES=${PHASES:-$default_phases}
+# Ensaio do dia inteiro, fora do estudo: COMPOSE_PROJECT_NAME=spring-cqrs-ensaio SCALE=0.01 ROOT=<pasta> REPS=1 ...
+SCALE=${SCALE:-1}
+ROOT=${ROOT:-docs/benchmarks}
 DAY=$(date +%F)
-PREFIX=docs/benchmarks/$DAY-${CAPACITY:+$CAPACITY-}
+PREFIX=$ROOT/$DAY-${CAPACITY:+$CAPACITY-}
 LOGS=bench/target/day-$DAY
 PROJECT=${COMPOSE_PROJECT_NAME:-spring-cqrs}
 ALL=(docker compose -f infra/compose.yaml --profile '*')
@@ -59,6 +62,7 @@ if [[ -n $others ]]; then
     docker stop $others > /dev/null
 fi
 
+failed=""
 for phase in $PHASES; do
     # Taxas da fase: no S5 a taxa que ele pergunta (ADR-0012), com o S1 e o S2 junto, como referência; na escada do
     # C1, os degraus a partir de onde a v3 parou (ADR-0013).
@@ -77,21 +81,31 @@ for phase in $PHASES; do
         rates=${rates:-"25 50 75"}
     fi
 
-    log "$phase: volumes apagados, subida e seed SCALE=1"
-    {
+    # Uma fase que falha não derruba as seguintes (29/10): o dia segue, e a falha vai para o log e para a notificação.
+    log "$phase: volumes apagados, subida e seed SCALE=$SCALE"
+    if ! {
         "${ALL[@]}" down -v --remove-orphans
         make up PHASE="$phase"
-        make seed PHASE="$phase" SCALE=1
-    } 2>&1 | tee "$LOGS/$phase.log"
+        make seed PHASE="$phase" SCALE="$SCALE"
+    } 2>&1 | tee "$LOGS/$phase.log"; then
+        log "$phase: falhou na subida ou no seed; seguindo para a próxima fase"
+        failed+=" $phase"
+        continue
+    fi
 
     log "$phase: benchmark${rates:+ (leitura: $rates)}"
-    OUT=$PREFIX$phase READ_RATES=$rates CAPACITY=$CAPACITY make bench PHASE="$phase" 2>&1 | tee -a "$LOGS/$phase.log"
+    if ! OUT=$PREFIX$phase READ_RATES=$rates CAPACITY=$CAPACITY make bench PHASE="$phase" 2>&1 \
+        | tee -a "$LOGS/$phase.log"; then
+        log "$phase: o benchmark falhou; seguindo para a próxima fase"
+        failed+=" $phase"
+    fi
 done
 
 phase=encerramento
 "${ALL[@]}" down
-log "medição concluída: $PREFIX*"
-if [[ -n $CAPACITY ]]; then
-    java bench/Report.java capacity "$PREFIX"* | tee "bench/target/day-$DAY/capacity-$CAPACITY.md"
+if [[ -n $CAPACITY ]] && ! java bench/Report.java capacity "$PREFIX"* | tee "$LOGS/capacity-$CAPACITY.md"; then
+    log "aviso: a tabela de capacidade não foi gerada"
 fi
+[[ -z $failed ]] || fail "medição concluída com falha em:$failed (log em $LOGS/)"
+log "medição concluída: $PREFIX*"
 notify "medição concluída ($PHASES${CAPACITY:+, $CAPACITY})"
