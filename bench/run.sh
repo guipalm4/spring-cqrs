@@ -71,8 +71,8 @@ log() { printf '\n[bench %s] %s\n' "$(date +%T)" "$*"; }
 for url in "$COMMANDS_URL" ${QUERIES_URLS//,/ }; do
     curl -fsS "$url/actuator/health" > /dev/null || { echo "$url fora do ar: make up PHASE=$PHASE" >&2; exit 1; }
 done
-has_mongo=$("${COMPOSE[@]}" ps --format '{{.Service}}' | grep -qx mongo && echo 1 || true)
-has_replica=$("${COMPOSE[@]}" ps --format '{{.Service}}' | grep -qx postgres-replica && echo 1 || true)
+has_mongo=$("${COMPOSE[@]}" ps --format '{{.Service}}' | grep -x mongo > /dev/null && echo 1 || true)
+has_replica=$("${COMPOSE[@]}" ps --format '{{.Service}}' | grep -x postgres-replica > /dev/null && echo 1 || true)
 # Com o tracing ligado (make up TRACE=1), as JVMs da v3 pagam um custo que a v1 e a v2 não pagaram (ADR-0012).
 if docker compose -f infra/compose.yaml --profile trace ps --format '{{.Service}}' | grep -qx tempo; then
     echo "o Tempo está no ar (TRACE=1): suba a fase sem TRACE para medir" >&2
@@ -375,7 +375,10 @@ run() { # nome writeRate readRate rep
     fi
 
     local report
-    report=$(ls -td bench/target/gatling/ledgersimulation-* | head -1)
+    # O caminho vem do log desta execução. Antes, "ls -td ... | head -1": com centenas de relatórios, o head fechava o
+    # pipe antes do fim do ls, e o SIGPIPE, com pipefail, derrubava a bancada (C2 de 29/10, exit 141).
+    report=$(sed -n 's#^Reports generated.*file://.*/\(bench/target/gatling/[^/]*\)/index\.html$#\1#p' "$dir/gatling.log")
+    [[ -n $report ]] || { echo "relatório do Gatling não encontrado em $dir/gatling.log" >&2; exit 1; }
     echo "${report#bench/target/gatling/}" > "$dir/gatling-report.txt"
     java bench/Report.java extract "$report" "$dir/stats.csv"
     java bench/Report.java seconds "$report" "$dir/seconds.csv"
