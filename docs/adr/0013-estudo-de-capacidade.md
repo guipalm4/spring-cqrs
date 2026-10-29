@@ -236,6 +236,11 @@ antes de medir, para a leitura não ser escolhida depois:
   fsync médio do WAL (`pg-seconds.csv`), o custo por página lida do Mongo (`mongo-cache.csv`) e o atraso da réplica.
   Se o fsync no degrau em que a fase para for pelo menos o dobro do degrau anterior, a parada é atribuída ao disco
   compartilhado, como limite do host, e não muda o veredito.
+- **Esta é a medição final do C2, e o M4.5 fecha com ela.** O C2 só se repete por falha da bancada, ou seja, um dia
+  interrompido ou um dado que falta. Resultado ruim, surpresa ou empate não justificam repetir. Um empate entre duas
+  fases no mesmo degrau é um resultado ("não se separam nesta escala, com degraus que dobram"), e não motivo para
+  outra escada. Uma hipótese sem veredito pela regra entra no capítulo como "sem veredito", com o limite que impediu
+  a resposta, e passa para o M6 ("quando não usar CQRS") como limite do estudo, sem medição nova neste marco.
 
 ## Alternativas consideradas
 

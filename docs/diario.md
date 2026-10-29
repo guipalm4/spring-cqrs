@@ -84,3 +84,15 @@ Até o M3, esse caminho está nos capítulos 1 a 3 do README ("O que mudou no en
   escrito no [ADR-0013](adr/0013-estudo-de-capacidade.md) (nota antes do C2) que os vereditos saem só pela regra e que
   o fsync do WAL e o custo por página do Mongo entram ao lado, com um limiar fixo (o dobro do degrau anterior) para
   atribuir a parada ao disco.
+
+## 2026-10-29 — C2: duas noites perdidas para a bancada, e um ponto final
+
+- 28/10: o C2 parou na v1-big, a 400/s. Uma amostra perdida do `docker stats` matou o laço de coleta, o `run.sh` saiu
+  com o amostrador do Postgres vivo, e o `day.sh` ficou 10 h esperando. 29/10, 18h: o `ls | head` que achava o
+  relatório do Gatling tomou SIGPIPE (335 relatórios) e parou a v1-big de novo. Os dados das duas noites foram
+  apagados: falha da bancada não vira resultado.
+- O que mudou na bancada: só o que invalida o dado é fatal (Gatling, relatório, veredito); a coleta auxiliar vira aviso
+  em `warnings.txt`; uma fase com falha não derruba as seguintes; o amostrador para em qualquer saída. Antes da noite,
+  um ensaio do dia inteiro (as cinco fases, seed 0,01, um degrau que derruba cada uma).
+- Decidido antes de medir ([ADR-0013](adr/0013-estudo-de-capacidade.md), nota antes do C2): esta é a medição final
+  do C2, e o M4.5 fecha com ela. Empate é resultado; hipótese sem veredito vai para o M6 como limite, sem medição nova.
