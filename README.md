@@ -3,12 +3,11 @@
 Ledger financeiro que começa com um modelo único (leitura e escrita no mesmo Postgres) e evolui para
 CQRS, medindo a cada fase o que melhora e o que custa.
 
-> **Status:** M4 — a v3 (CQRS físico) custa 3 vezes a memória e de 2 a 5 vezes a CPU da v1, com atraso de projeção de
-> ~15 ms e uma cauda nos comandos; nenhuma fase colapsou, e a interferência que ela deveria eliminar não apareceu
-> ([resultados](docs/benchmarks/2026-10-21-v3/README.md)). Próximo: estudo de capacidade contra uma réplica de leitura
-> ([ADR-0013](docs/adr/0013-estudo-de-capacidade.md)). Antes: no M2, a leitura derruba a escrita na v1; na #11, separar
-> os pools não protege a escrita; no M3, a v2 deixou as consultas de 3 a 8 vezes menos dependentes do disco.
-> Escopo, hipóteses e marcos em [docs/SCOPE.md](docs/SCOPE.md); contrato e dataset no
+> **Status:** M4.5 — levadas até a saturação, as fases se separam pelo cenário. No pico de leitura (C1), a v3 (CQRS
+> físico) é, das fases medidas a 600 consultas/s, a única que mantém os comandos de pé; na escrita intensa (C2), ela
+> sustenta um quarto da v1, com os dois stores no mesmo disco. A v2 (CQRS lógico) empata no C1 e lidera o C2; a réplica
+> de leitura foi a pior fase nos dois ([capítulo 5](#5-em-que-regime-o-cqrs-se-paga-capacidade-m45-17)). Próximo:
+> OpenSearch para o Q4 (M5). Escopo, hipóteses e marcos em [docs/SCOPE.md](docs/SCOPE.md); contrato e dataset no
 > [ADR-0008](docs/adr/0008-contrato-v1-e-dataset.md).
 
 ## A história
@@ -321,7 +320,112 @@ tag [`m4`](https://github.com/guipalm4/spring-cqrs/tree/m4)
 
 **Pergunta.** Levando cada fase até a saturação, a v3 sustenta mais carga que a v1 e que uma réplica de leitura da v1,
 num pico de leitura (C1) e numa escrita intensa com busca (C2)? (H8, H9, e a H3 e a H7 relidas)
-Previsões no [ADR-0013](docs/adr/0013-estudo-de-capacidade.md). *A medir.*
+
+**Antes de medir, a régua.** O [ADR-0013](docs/adr/0013-estudo-de-capacidade.md) trocou a taxa fixa por escadas de
+carga, com o maior degrau sustentado como resultado:
+- critérios absolutos: comandos com p95 ≤ 50 ms, consultas com p95 ≤ 250 ms, KO ≤ 1%, vazão ≥ 98% da oferecida e, com
+  consistência eventual, atraso p99 ≤ 2 s;
+- degrau sustentado em pelo menos 2 de 3 repetições de 180 s;
+- a escada para no primeiro degrau que não passa.
+
+Entrou uma fase nova, a **v1-replica**: a v1 sem mudança de código, com as consultas numa réplica *streaming* do
+Postgres. É o que um time tentaria antes do CQRS. As previsões P1–P7 e o que contaria como vitória de cada lado foram
+escritos antes. Antes do C2, ficou escrito também que ele seria a medição final, que o disco seria informado ao lado
+do veredito sem mudá-lo e que empate é resultado.
+
+**Evidência: C1, pico de leitura** (escrita a 20/s, leitura de 75 a 1200/s).
+
+<!-- java bench/Report.java capacity docs/benchmarks/2026-10-27-c1-* docs/benchmarks/2026-10-28-c1-* -->
+```mermaid
+xychart-beta horizontal
+    title "C1: maior degrau sustentado (consultas/s)"
+    x-axis ["v1", "v1-big", "v1-replica", "v2", "v3 (27/10)", "v3 (28/10)"]
+    y-axis "consultas/s"
+    bar [300.00, 300.00, 150.00, 300.00, 300.00, 300.00]
+```
+
+- **H3 confirmada.** A 600/s, os comandos da v3 ficam com 0% de KO, e os da v1 e da v1-big com 94% e 83%. É a
+  interferência que a taxa fixa do M4 não alcançou.
+- **O CQRS vence a réplica no C1** (P4): 300 contra 150. A réplica perdeu também para a v1 sem réplica. Ela reaplica
+  todo o WAL no mesmo disco virtual, e cada bloco que lê custa 2 a 3 vezes mais.
+- **H8 inconclusiva.** O degrau em que a réplica protegeria a escrita (600) não foi medido, porque as consultas dela
+  caíram antes e a regra de parada acopla os dois lados.
+- **H7 sem veredito pela regra.** A v3 com duas `query-api` não sustentou 600, e o Mongo não estava no teto de CPU. Lido
+  depois: o limite foi o disco.
+- **v1, v1-big, v2 e v3 empatam em 300.** Com degraus que dobram, a régua não as separa.
+
+**Evidência: C2, escrita intensa** (leitura a 75/s, escrita de 20 a 800/s). A v1-replica não sustentou nenhum degrau
+e não aparece no gráfico.
+
+<!-- java bench/Report.java capacity docs/benchmarks/2026-10-29-c2-* -->
+```mermaid
+xychart-beta horizontal
+    title "C2: maior degrau sustentado (comandos/s)"
+    x-axis ["v1", "v1-big", "v2", "v3"]
+    y-axis "comandos/s"
+    bar [200.00, 100.00, 400.00, 50.00]
+```
+
+- **O CQRS físico está refutado no C2.** A v3 parou dois degraus abaixo da v1, e pelos comandos (p95 de 151 a 274
+  ms a 100/s), com a projeção em dia (atraso p99 de 0,36 s). A **H9** cai junto: tirar os índices de leitura do
+  modelo de escrita num store separado reduziu a capacidade de escrita a um quarto.
+- **A v2 sustentou o dobro da v1** (P6 refutada a favor dela). Ela também tira o `search_vector` e os GIN da tabela
+  de escrita, mas no mesmo Postgres, e lê do disco de um sexto a um terço das páginas da v1.
+- **A v1-replica caiu no primeiro degrau**, a mesma carga que sustentou no C1, com a Q3 na réplica 340 vezes mais
+  lenta. A causa não foi achada. Pela regra, não se repete: a P5 fica refutada pela letra, com o mecanismo sem
+  teste.
+
+A mediana dos comandos da v3 a 100/s é de 3 ms. O que derruba o p95 são travadas periódicas:
+
+<!-- java bench/Report.java chart docs/benchmarks/2026-10-29-c2-v3/runs/c2-w0100/r2/seconds.csv max "..." 1 2000 -->
+```mermaid
+xychart-beta
+    title "v3 a 100 comandos/s: resposta máxima a cada segundo, comandos e consultas, em ms (r2)"
+    x-axis "segundos desde o início" 0 --> 179
+    y-axis 0 --> 2000
+    line [65.00, 63.00, 60.00, 40.00, 26.00, 20.00, 41.00, 28.00, 45.00, 24.00, 43.00, 25.00, 25.00, 40.00, 34.00, 1347.00, 1044.00, 113.00, 25.00, 31.00, 17.00, 21.00, 27.00, 126.00, 42.00, 24.00, 33.00, 20.00, 24.00, 24.00, 21.00, 83.00, 20.00, 25.00, 20.00, 26.00, 42.00, 19.00, 1493.00, 1234.00, 341.00, 18.00, 26.00, 18.00, 25.00, 41.00, 29.00, 24.00, 27.00, 26.00, 31.00, 32.00, 30.00, 23.00, 11.00, 38.00, 25.00, 28.00, 17.00, 25.00, 26.00, 30.00, 21.00, 29.00, 19.00, 22.00, 34.00, 33.00, 44.00, 16.00, 1421.00, 1371.00, 396.00, 34.00, 23.00, 18.00, 40.00, 244.00, 14.00, 19.00, 17.00, 26.00, 17.00, 31.00, 19.00, 48.00, 24.00, 51.00, 26.00, 23.00, 33.00, 129.00, 71.00, 27.00, 25.00, 38.00, 41.00, 17.00, 28.00, 24.00, 22.00, 31.00, 33.00, 1594.00, 836.00, 26.00, 23.00, 29.00, 28.00, 28.00, 22.00, 39.00, 182.00, 24.00, 20.00, 36.00, 25.00, 24.00, 44.00, 25.00, 18.00, 21.00, 22.00, 30.00, 18.00, 20.00, 26.00, 42.00, 28.00, 18.00, 19.00, 29.00, 26.00, 28.00, 30.00, 1758.00, 1225.00, 225.00, 38.00, 35.00, 26.00, 25.00, 35.00, 17.00, 47.00, 30.00, 30.00, 20.00, 22.00, 22.00, 23.00, 24.00, 10.00, 28.00, 43.00, 91.00, 54.00, 37.00, 26.00, 18.00, 27.00, 24.00, 22.00, 17.00, 25.00, 25.00, 33.00, 1830.00, 1693.00, 682.00, 31.00, 39.00, 30.00, 72.00, 25.00, 19.00, 57.00, 23.00, 33.00, 24.00]
+```
+
+São travadas de 1 a 1,8 s a cada ~32 s. Cada uma vem seguida de um segundo em que o fsync do WAL leva de 2,5 a 33 ms,
+contra 0,6 ms nos outros. É a cauda do capítulo 4, agora grande o bastante para passar do critério. Por comando, a v3
+grava 70 KB no Mongo e 3,7 KB de WAL, no mesmo disco. A regra escrita antes (fsync médio do degrau com pelo menos o
+dobro do anterior) não atribui essa parada ao disco: a média não enxerga 14 segundos em 180. A leitura acima foi feita
+depois de medir.
+
+**O que mudou no entendimento.** O CQRS físico se paga onde a leitura satura: no C1, das fases medidas a 600/s, a v3 é
+a única que mantém os comandos de pé. Ele não se paga quando a escrita é a carga e os dois stores dividem um disco: a
+v3 grava muito mais por comando (70 KB no Mongo, além do Kafka), e as travadas do disco derrubam os comandos (leitura
+feita depois de medir). O que ganhou nos dois cenários foi o mais barato dos separadores. A v2, com as projeções no
+mesmo Postgres, empata em 300 no C1 com as consultas mais rápidas e lidera o C2. A réplica, a alternativa "sem mudar
+código", foi a pior fase nos dois dias neste host. O modo de falha também ficou claro: nenhuma fase degrada aos
+poucos. As threads virtuais aceitam requisições até o heap acabar, e a JVM cai de uma vez um degrau depois do último
+sustentado.
+
+**Decisão.** Fechar o M4.5 com as duas noites, sem medição nova e sem mudar a régua. O que ficou sem resposta vai para
+o M6 como limite do estudo:
+- H8 e o mecanismo da P5;
+- a queda da réplica no C2;
+- o disco único do host;
+- a falta de limite de concorrência na entrada.
+
+Um semáforo ou um `max-connections` trocaria a queda por recusas, igual em todas as fases. Ele fica fora deste marco
+para não mudar o código no meio do estudo.
+
+**Custo.** Quatro noites de medição. Duas se perderam por falhas da bancada (amostrador órfão, SIGPIPE no `ls | head`)
+e foram apagadas ([diário](docs/diario.md)). A bancada passou a separar o que invalida o dado (fatal) da coleta
+auxiliar (aviso), e foi ensaiada inteira antes da noite final.
+
+**Limites.**
+- Um host, com fases, stores e gerador no mesmo disco virtual. Em produção, o Mongo e a réplica teriam disco próprio.
+- Degraus que dobram: a capacidade de cada fase está entre o último degrau sustentado e o seguinte.
+- Uma noite por cenário. O C1 e o C2 não se comparam entre si.
+- A réplica mudou de comportamento entre as noites com a mesma carga, e a causa não foi isolada.
+
+Dados: [análise do C1](docs/benchmarks/2026-10-27-c1/README.md) ·
+[análise do C2](docs/benchmarks/2026-10-29-c2/README.md) ·
+[diagnóstico da cauda da v3](docs/benchmarks/2026-10-27-v3-diag/README.md) ·
+[ADR-0013](docs/adr/0013-estudo-de-capacidade.md) ·
+tag [`m4.5`](https://github.com/guipalm4/spring-cqrs/tree/m4.5)
 
 ### 6. Um modelo de escrita, vários de leitura: OpenSearch (M5)
 
