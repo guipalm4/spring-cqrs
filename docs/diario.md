@@ -96,3 +96,18 @@ Até o M3, esse caminho está nos capítulos 1 a 3 do README ("O que mudou no en
   um ensaio do dia inteiro (as cinco fases, seed 0,01, um degrau que derruba cada uma).
 - Decidido antes de medir ([ADR-0013](adr/0013-estudo-de-capacidade.md), nota antes do C2): esta é a medição final
   do C2, e o M4.5 fecha com ela. Empate é resultado; hipótese sem veredito vai para o M6 como limite, sem medição nova.
+
+## 2026-10-30 — C2: o CQRS físico refutado, e a v2 em primeiro
+
+- A noite correu inteira, sem falha da bancada: cinco fases, nenhum aviso. Maior degrau de escrita sustentado: v2
+  400, v1 200, v1-big 100, v3 50, v1-replica nenhum ([análise](benchmarks/2026-10-29-c2/README.md)).
+- Esperávamos que a v3 sustentasse a escrita acima da v1 (P7) e que a v2 parasse junto ou antes dela (P6). Deu o
+  contrário nas duas. A v3 parou dois degraus abaixo da v1, pelos comandos, com a projeção em dia: o CQRS físico fica
+  refutado no C2, e a H9 também. A v2, que tira os índices de leitura do modelo de escrita mas no mesmo Postgres,
+  sustentou o dobro da v1.
+- Pela regra do fsync médio, a parada da v3 não é do disco. Lido depois: a mediana dos comandos fica em 3 ms, e a
+  cauda vem de travadas de 1 a 1,8 s a cada ~32 s, seguidas de fsync do WAL de até 33 ms. É a cauda do diagnóstico,
+  agora grande o bastante para passar do critério. A média do degrau não a enxerga.
+- Surpresa sem causa achada: a v1-replica caiu no primeiro degrau, a mesma carga que ela sustentou no C1. A Q3 na
+  réplica foi de 4,6 ms para 1,6 s, lendo 100 vezes mais páginas do disco. Pela regra, não se repete: fica como
+  resultado, com a ressalva, e o mecanismo da P5 vai para o M6.

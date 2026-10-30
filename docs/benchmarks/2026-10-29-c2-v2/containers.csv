@@ -1,0 +1,5 @@
+container,cpus
+spring-cqrs-app-cqrs-1,2.00
+spring-cqrs-postgres-1,2.00
+spring-cqrs-postgres-exporter-1,0.25
+spring-cqrs-prometheus-1,0.50
