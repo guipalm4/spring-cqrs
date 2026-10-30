@@ -33,12 +33,12 @@ columns=(
     # Fração do tempo com a JVM parada em GC: a pausa para todas as requisições, com ou sem conexão (ADR-0010). Uma
     # pausa mais longa que a janela derruba a coleta e fica vazia aqui; o total por execução está no prometheus.csv.
     "gc_pause_ratio|sum(rate(jvm_gc_pause_seconds_sum[15s]))"
-    # v3 (ADR-0012): a JVM dos comandos separada da das consultas, e o atraso da projeção; vazias nas outras fases
-    # (na v1 e na v2, as duas JVMs são a mesma, e as colunas de comandos repetem as totais).
-    "command_heap_mib|sum(jvm_memory_used_bytes{area=\"heap\",instance=~\"(command-api|app-.*):8080\"}) / 1048576"
-    "command_gc_pause_ratio|sum(rate(jvm_gc_pause_seconds_sum{instance=~\"(command-api|app-.*):8080\"}[15s]))"
-    "query_heap_mib|sum(jvm_memory_used_bytes{area=\"heap\",instance=~\"query-api.*\"}) / 1048576"
-    "query_gc_pause_ratio|sum(rate(jvm_gc_pause_seconds_sum{instance=~\"query-api.*\"}[15s]))"
+    # v3 (ADR-0012) e v1-replica (ADR-0013): a JVM dos comandos separada da das consultas, e o atraso da projeção;
+    # vazias nas outras fases (na v1 e na v2, as duas JVMs são a mesma, e as colunas de comandos repetem as totais).
+    "command_heap_mib|sum(jvm_memory_used_bytes{area=\"heap\",instance=~\"(command-api|app-baseline|app-baseline-split|app-baseline-big|app-cqrs):8080\"}) / 1048576"
+    "command_gc_pause_ratio|sum(rate(jvm_gc_pause_seconds_sum{instance=~\"(command-api|app-baseline|app-baseline-split|app-baseline-big|app-cqrs):8080\"}[15s]))"
+    "query_heap_mib|sum(jvm_memory_used_bytes{area=\"heap\",instance=~\"(query-api.*|app-baseline-query):8080\"}) / 1048576"
+    "query_gc_pause_ratio|sum(rate(jvm_gc_pause_seconds_sum{instance=~\"(query-api.*|app-baseline-query):8080\"}[15s]))"
     "projection_lag_p95_ms|1000 * histogram_quantile(0.95, sum by (le) (rate(ledger_projection_lag_seconds_bucket[15s])))"
     "outbox_backlog|sum(ledger_outbox_backlog)"
 )

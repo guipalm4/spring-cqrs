@@ -1,0 +1,3 @@
+metric,value
+outbox_end,0
+kafka_lag_end,4146

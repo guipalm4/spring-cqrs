@@ -1,0 +1,17 @@
+metric,value
+hikari_pending_max,NaN
+hikari_pending_avg,NaN
+hikari_active_avg,NaN
+hikari_acquire_max_s,NaN
+hikari_acquire_avg_s,NaN
+hikari_usage_avg_s,NaN
+app_cpu_avg,NaN
+gc_pause_total_s,NaN
+pg_blks_hit,118040.038175137
+pg_blks_read,0
+projection_lag_p50_s,NaN
+projection_lag_p99_s,NaN
+projection_lag_max_s,NaN
+projection_applied,NaN
+projection_duplicates,NaN
+outbox_backlog_max,NaN

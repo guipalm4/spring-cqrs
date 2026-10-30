@@ -10,6 +10,8 @@ scrape_configs:
           - app-baseline:8080
           - app-baseline-split:8080
           - app-baseline-big:8080
+          # v1-replica: as consultas, lendo da réplica (ADR-0013).
+          - app-baseline-query:8080
           - app-cqrs:8080
           # v3: o rótulo instance separa as JVMs (comandos, consultas, projetor).
           - command-api:8080

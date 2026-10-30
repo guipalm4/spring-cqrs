@@ -193,6 +193,55 @@ Resultado contrário a qualquer previsão entra no capítulo igual.
   - **H9:** com escrita intensa, tirar os índices de leitura do modelo de escrita aumenta a capacidade de escrita, o
     que uma réplica não consegue (C2).
 
+### Notas de implementação (2026-10-27, antes de medir)
+
+- No PostgreSQL 18, o tempo de escrita e de fsync do WAL saiu do `pg_stat_wal` e foi para o `pg_stat_io`
+  (`object = 'wal'`); o `track_wal_io_timing` controla esse tempo lá. A bancada lê os dois, a cada segundo
+  (`pg-seconds.csv`).
+- "CPU das fases baixa", no limite do gerador (decisão 2), é: nenhum container da fase passou de metade do seu limite
+  de CPU em mais de 10% das amostras do degrau (o p90). A primeira versão usava a média. No ensaio de 27/10 (seed
+  0,01, fora do estudo), a réplica saturou por 15 s, o app das consultas morreu por falta de heap e a média ficou em
+  47%: uma saturação curta passaria por limite do gerador. Os critérios ficam em `bench/Report.java` (`judge`), que a
+  bancada usa para a regra de parada.
+- A vazão é a do Gatling: requisições divididas pelos segundos do relatório, contados inteiros. Um segundo a mais
+  custa 1/`DURATION`, ou seja 0,55% com 180 s, dentro da folga de 2%. Em degraus curtos de ensaio (30 s, 3,3%), o
+  critério de vazão não vale.
+- No ensaio, o gerador sustentou 620 requisições/s (90 s, a v1-replica com folga). A 1200/s, a fase caiu antes dele,
+  então o teto do gerador não foi medido. Acima do joelho, as threads virtuais aceitam requisições sem limite até o
+  heap acabar: a fase não perde vazão aos poucos, cai de uma vez. A escada para no primeiro degrau não sustentado.
+- Uma repetição que termina com uma JVM da fase sem responder ao health por 60 s grava `down.txt`. O degrau fica
+  reprovado, mesmo que as outras repetições passem, e as repetições seguintes não rodam. A regra foi acrescentada na
+  noite de 27/10: no primeiro C1, a v1 ficou sem heap na r1 do degrau de 600/s e não voltou. A r2 deu 100% de KO, e a
+  bancada abortou o dia (série por segundo vazia). O dia foi refeito do zero com a regra. A regra vale para todas as
+  fases e não muda o veredito daquele degrau, que já reprovava pelos critérios de latência e KO.
+- O aquecimento é sempre no degrau base do cenário (escrita a 20/s e leitura a 75/s), mesmo quando a escada começa
+  mais alto. No C1 de 27/10, a v3-s5 aqueceu a 600/s, onde começava, com as JVMs e o cache frios. As duas query-apis
+  chegaram ao degrau já no limite de memória e a 100% de CPU, sem atender. O resultado foi descartado (fica em
+  `bench/target`), e a v3 e a v3-s5 foram refeitas juntas em 28/10. A H7 compara as duas no mesmo dia; a v3 de 27/10
+  continua na comparação com as outras fases.
+- A fila no fim do degrau é medida logo depois do Gatling: na v3, o outbox mais o lag do consumer group (o lag leva
+  alguns segundos para sair, a favor da v3); na v1-replica, o WAL ainda não aplicado dividido pelo WAL gerado por
+  segundo no degrau. Entre repetições, a execução seguinte só começa com a fila vazia.
+
+### Nota antes do C2 (2026-10-28)
+
+No C1, o degrau de 600/s parou no disco virtual que os stores dividem, não na CPU: o custo de cada página lida pelo
+Mongo e o fsync médio do WAL subiram nas repetições que caíram
+([análise](../benchmarks/2026-10-27-c1/README.md)). No C2 o disco deve pesar mais, porque a carga é escrita. Escrito
+antes de medir, para a leitura não ser escolhida depois:
+
+- Os vereditos de P5–P7 saem só pela regra acima, sem exceção para o disco. Se a v3 parar pelos comandos no mesmo
+  degrau da v1, o CQRS fica refutado no C2, mesmo que a causa seja o disco.
+- Junto do veredito, a análise informa, para o último degrau sustentado e o primeiro não sustentado de cada fase, o
+  fsync médio do WAL (`pg-seconds.csv`), o custo por página lida do Mongo (`mongo-cache.csv`) e o atraso da réplica.
+  Se o fsync no degrau em que a fase para for pelo menos o dobro do degrau anterior, a parada é atribuída ao disco
+  compartilhado, como limite do host, e não muda o veredito.
+- **Esta é a medição final do C2, e o M4.5 fecha com ela.** O C2 só se repete por falha da bancada, ou seja, um dia
+  interrompido ou um dado que falta. Resultado ruim, surpresa ou empate não justificam repetir. Um empate entre duas
+  fases no mesmo degrau é um resultado ("não se separam nesta escala, com degraus que dobram"), e não motivo para
+  outra escada. Uma hipótese sem veredito pela regra entra no capítulo como "sem veredito", com o limite que impediu
+  a resposta, e passa para o M6 ("quando não usar CQRS") como limite do estudo, sem medição nova neste marco.
+
 ## Alternativas consideradas
 
 - **Subir as taxas fixas até a v1 colapsar:** escolher o ponto de carga pelo resultado, o que o ADR-0009 recusou.

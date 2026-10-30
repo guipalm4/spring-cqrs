@@ -27,13 +27,13 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        phase: [v1, v2]
+        phase: [v1, v1-replica, v2]
     steps:
       - uses: actions/checkout@v7
       - name: Sobe a fase ${{ matrix.phase }}
         run: make up PHASE=${{ matrix.phase }}
       - name: Smoke test
-        run: make smoke
+        run: make smoke PHASE=${{ matrix.phase }}
       - name: Logs em caso de falha
         if: failure()
         run: docker compose -f infra/compose.yaml --profile ${{ matrix.phase }} logs

@@ -25,11 +25,13 @@ medindo cada fase. O valor do projeto está na comparação honesta, não em "CQ
 
 ```bash
 make verify          # build + testes (Testcontainers; precisa de Docker)
-make up PHASE=v1     # sobe a fase e espera ficar saudável (v1 | v1-split | v1-big | v2 | v3 | v3-s5)
+make up PHASE=v1     # sobe a fase e espera ficar saudável (v1 | v1-split | v1-big | v1-replica | v2 | v3 | v3-s5)
 make smoke           # health da aplicação em :8080 (na v3, também a query-api em :8081)
 make seed SCALE=1    # APAGA e carrega o dataset (1 = referência; 0.01 para testes manuais rápidos)
                      # na v3, o projetor carrega o Mongo a partir do ledger (MongoSeed), sem o rebuild da v2
 make bench PHASE=v1  # benchmark da fase no ar (~1h20 com SCALE=1) -> docs/benchmarks/<data>-<fase>/
+                     # CAPACITY=c1|c2: escada até o primeiro degrau não sustentado (ADR-0013)
+CAPACITY=c1 bench/day.sh  # dia de medição: todas as fases do cenário, cada uma com o seed recarregado
 make down            # make clean também apaga o volume do Postgres
 ```
 
@@ -95,16 +97,24 @@ O JDK 25 vem do `.tool-versions` (asdf). Não setar `JAVA_HOME` para outro JDK.
   dele no `docker-stats.csv` antes de atribuir uma cauda a uma fase.
 - O MongoDB 8 sai na partida em kernels de 6.19 a 7.0.13 (SERVER-121912). O `verify` do CI fica no `ubuntu-22.04`
   por isso; o Docker Desktop local também pode chegar nessa faixa ao atualizar.
+- Acima do joelho, as threads virtuais aceitam requisições sem limite até o heap acabar: a JVM não degrada aos poucos,
+  fica de pé sem responder (`OutOfMemoryError`). O `run.sh` grava `down.txt` e os logs (`logs-app-*.txt`) nesse caso.
+- Aquecimento sempre no degrau base do cenário, mesmo quando a escada começa mais alto: JVM e cache frios num degrau
+  alto chegam mortos à medição (v3-s5 do C1, 27/10).
+- Bancada com `set -euo pipefail`: `ls | head` toma SIGPIPE (status 141) e derruba o script; um `kill` de processo já
+  morto também. Só o que invalida o dado é fatal; coleta auxiliar passa pelo `optional` do `run.sh` (vira
+  `warnings.txt`). Antes de uma noite de medição, ensaiar o dia inteiro com `SCALE=0.01 ROOT=<pasta>` (`day.sh`).
+- A v1-replica depende do cache da réplica, que a bancada não controla: a mesma carga passou em 27/10 e caiu em 29/10
+  (Q3 de 4,6 ms para 1,6 s). A bancada só guarda `EXPLAIN` da v1 e da v2.
 
-## Marco atual: M4.5 — estudo de capacidade (issue #17)
+## Marco atual: M5 — OpenSearch (issue #6)
 
-Medir capacidade, não latência a taxa fixa ([ADR-0013](docs/adr/0013-estudo-de-capacidade.md)): cada fase sobe uma
-escada de carga e o resultado é o maior degrau sustentado (critérios absolutos e regra de parada no ADR, fixos). C1 =
-pico de leitura (escrita a 20/s), C2 = escrita intensa com busca (leitura a 75/s), em dias diferentes. Fases: v1, v1-big,
-v1-replica (nova: réplica streaming do Postgres, consultas na réplica), v2, v3; v3-s5 só no C1. As previsões P1–P7 já
-estão escritas no ADR: conferir contra elas, sem ajustar a régua depois. Antes do primeiro dia: confirmar a causa da
-cauda da v3 (S1 com o projetor parado, `pg_stat_wal`), Grafana desligado durante a medição, carga do host no `env.md`.
-Sem ajuste do WiredTiger para suavizar rajadas (vantagem de configuração).
-Lições do M4: longe da saturação a v3 só mostra custo fixo (3× memória, 2–5× CPU, Kafka > Postgres da v1) e uma cauda
-nos comandos (p99 ~110 ms) correlacionada com rajadas de escrita do Mongo no disco compartilhado; a v3 lê mais caro
-que a v2 em Q2/Q3 com o mesmo documento.
+Segunda projeção, com consumer group próprio, servindo o Q4 a partir do mesmo modelo de escrita da v3: 1 modelo de
+escrita → N modelos de leitura. Responde a H6 (OpenSearch supera Mongo e Postgres no Q4 com filtros combinados).
+Antes de medir, escrever as previsões e o critério num ADR, como no ADR-0013. Lições do M4.5
+([capítulo 5](README.md#5-em-que-regime-o-cqrs-se-paga-capacidade-m45-17)): no C1 a v3 protege os comandos onde a
+v1 cai, mas no C2 sustenta um quarto da escrita da v1, com travadas periódicas nos comandos que coincidem com picos
+de fsync do WAL (leitura feita depois de medir, não pela regra). Um terceiro store no mesmo disco pode agravar isso:
+a medição precisa mostrar o efeito nos comandos. A v2 foi a
+melhor fase nos dois cenários. Limites para o M6: H8, o mecanismo da P5, a queda da réplica no C2, o disco único e a
+falta de limite de concorrência na entrada.

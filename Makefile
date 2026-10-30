@@ -4,6 +4,7 @@ SCALE ?= 1
 SALT ?= 42
 PSQL = $(COMPOSE) exec -T postgres psql -v ON_ERROR_STOP=1 -U ledger -d ledger
 V3 := $(filter v3 v3-s5,$(PHASE))
+REPLICA := $(filter v1-replica,$(PHASE))
 
 # make up PHASE=v3 TRACE=1: sobe o Tempo e soma o profile trace ao papel de cada JVM da v3 (ADR-0012). O make bench
 # se recusa a medir nesse modo.
@@ -29,13 +30,13 @@ help: ## Lista os alvos
 verify: ## Compila e roda todos os testes (Testcontainers)
 	./mvnw -B -ntp verify
 
-up: ## Sobe a fase: make up PHASE=v1|v1-split|v1-big|v2|v3|v3-s5 [TRACE=1] (ADR-0010, ADR-0012)
+up: ## Sobe a fase: make up PHASE=v1|v1-split|v1-big|v1-replica|v2|v3|v3-s5 [TRACE=1] (ADR-0010, ADR-0012, ADR-0013)
 	$(COMPOSE) up -d --build --wait
 
 down: ## Derruba a fase, mantendo o volume do Postgres
 	$(COMPOSE) down
 
-clean: ## Derruba a fase e apaga os volumes (Postgres e, na v3, Mongo)
+clean: ## Derruba a fase e apaga os volumes (Postgres, réplica e Mongo)
 	$(COMPOSE) down -v
 
 ps: ## Estado dos containers da fase
@@ -44,12 +45,17 @@ ps: ## Estado dos containers da fase
 logs: ## Acompanha os logs da fase
 	$(COMPOSE) logs -f
 
-smoke: ## Confere se a aplicação da fase está saudável (na v3, command-api e query-api)
-	@for port in 8080 $(if $(V3),8081) $(if $(filter v3-s5,$(PHASE)),8082); do \
+smoke: ## Confere se a aplicação da fase está saudável (na v3 e na v1-replica, também a instância das consultas)
+	@for port in 8080 $(if $(V3)$(REPLICA),8081) $(if $(filter v3-s5,$(PHASE)),8082); do \
 	  for i in $$(seq 1 30); do \
 	    curl -fsS localhost:$$port/actuator/health && echo && continue 2; sleep 2; \
 	  done; echo "aplicação em :$$port não respondeu" >&2; exit 1; \
 	done
+ifneq ($(REPLICA),)
+	@# A réplica precisa estar recebendo o WAL do primário, não só aceitando conexões.
+	@state=$$($(PSQL) -qAt -c "SELECT string_agg(state, ',') FROM pg_stat_replication"); \
+	  echo "replicação: $${state:-nenhuma}"; [ "$$state" = streaming ] || exit 1
+endif
 
 seed: ## Carrega o dataset (APAGA os dados) e as projeções da v2 ou da v3: make seed SCALE=1 (ADR-0008, ADR-0012)
 	$(PSQL) -q -f - < bench/seed/seed.sql
@@ -62,5 +68,5 @@ else
 	$(PSQL) -q -f - < bench/seed/rebuild.sql
 endif
 
-bench: ## Benchmark da fase no ar: make bench PHASE=v1 (~1h20; ADR-0005, ADR-0009, ADR-0012)
-	PHASE=$(PHASE) bench/run.sh
+bench: ## Benchmark da fase no ar: make bench PHASE=v1 [CAPACITY=c1|c2] (taxas fixas ~1h20; escada ~1h; ADR-0013)
+	PHASE=$(PHASE) CAPACITY=$(CAPACITY) bench/run.sh
